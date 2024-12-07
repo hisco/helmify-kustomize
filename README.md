@@ -1,17 +1,19 @@
 
 # helmify-kustomize
 
-`helmify-kustomize` is a cli tool designed to make a Kustomize folder compatible with Helm. This tool allows you to upload (pack) a Kustomize folder into an Helm chart format without converting it.
+`helmify-kustomize` is a cli tool designed to make a Kustomize folder compatible with Helm. This tool allows you to upload (pack) a Kustomize folder into an Helm chart format without manually converting it.
+This to enjoy both the philosophy of kustomize and the shipping functionality of helm.
 
 ## Features
 
 - Processes each Kustomize overlays and base configurations and outputs Helm-compatible files based on provided templates.
 - Packs all overlays as a single chart.
 - Enables helm shipping functionality on a kustomize folder.
+- Support helm values with kustomize replacements.
 
 ## Installation
 
-Esiest no installation (other then nodejs ) just use it with `npx`
+Easiest, no installation (other then nodejs ) just use it with `npx`
 ```sh
 npx helmify-kustomize <context> --chart-name example-service --target <targetFolder>
 ```
@@ -103,6 +105,62 @@ appVersion: 1.0.0
 ```
 
 By following these guidelines, you can ensure that your Helm chart names are valid and compatible with Helm and Kubernetes naming conventions.
+
+## Kustomize replacements with helm values
+
+Kustomize Replacements are used to copy fields from one source into any number of specified targets.
+Combined with .env file you can use it to dynamically set values in your helm chart using helm values.
+
+During the build process the following happens:
+1. All configMapGenerator and secretGenerator fields are being read from the kustomization.yaml file
+2. All Replacements are being read from the kustomization.yaml file.
+3. ConfigMaps and Secrets are being created as helm templates with is using property accessors to access the values such as `{{ .Values.".env".propertyName | default "actual value from .env file" }}` with a default value of the actual value from the .env file.
+By the following logic:
+- If the property is only being used in a replacement, the property will be set as a placeholder in the helm template with no default value.
+- If the property is set in the .env file, the default value will be the value from the .env file.
+- property accessor is calculated based on the file name, and property name `{{ .Values.".env".propertyName }}`, supporting any file name and property name.
+
+Example:
+Your kustomization.yaml file contains the following:
+```yaml
+configMapGenerator:
+- name: example-configmap
+  files:
+  - .env
+replacements:
+  - source:
+      fieldPath: data.NAMESPACE
+      kind: ConfigMap
+      name: example-configmap
+    targets:
+      - fieldPaths:
+        - metadata.namespace
+        options:
+          create: true
+        reject:
+        - kind: Namespace
+        select: {}
+```
+
+Your .env file contains the following:
+(Notice we are missing the NAMESPACE property in the .env file)
+```
+EXAMPLE_PROPERTY=example_value
+```
+
+After the build process the following helm template is created:
+```yaml
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: example-configmap
+data:
+  EXAMPLE_PROPERTY: {{ .Values.".env".EXAMPLE_PROPERTY | default "example_value" }}
+  NAMESPACE: {{ .Values.".env".NAMESPACE }}
+```
+Notice:
+- For EXAMPLE_PROPERTY default value is being set from the .env file.
+- For NAMESPACE there is no default value set, so it will be empty.
 
 
 ## Contributing
