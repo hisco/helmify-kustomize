@@ -1,0 +1,5 @@
+- op: replace
+  path: /spec/template/spec/metadata
+  value:
+    labels:
+      app: dev

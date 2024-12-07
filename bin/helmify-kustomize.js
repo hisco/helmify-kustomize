@@ -16,6 +16,8 @@ program
     .option('--chart-name <chartName>', 'The name of the chart', '')
     .option('--chart-version <chartVersion>', 'The version of the chart', '0.1.0')
     .option('--chart-description <chartDescription>', 'The description of the chart', 'A Helm chart for Kubernetes')
+    // add a list of files to parametrize, example --parametrize devEnv=overlays/dev/.env --parametrize baseEnv=base/.env
+    .option('--parametrize <parametrize>', 'List of files to parametrize', collect, [])
     .action((actionArg, directoryArg ) => {
         directory = directoryArg
         action = actionArg
@@ -26,6 +28,11 @@ if (action!= 'build') {
     process.exit(1);
 }
 const options = program.opts();
+const parametrize = options.parametrize || [];
+
+// Add more detailed logging
+console.log('Parametrize flags:', parametrize);
+console.log('Number of parametrize flags:', parametrize.length);
 
 // Get current working directory
 const cwd = process.cwd();
@@ -63,7 +70,8 @@ wrapKustomizeIntoHelm({
     chartVersion: options.chartVersion,
     chartDescription: options.chartDescription,
     fs: require('fs'),
-    execSync: logAndExecSync
+    execSync: logAndExecSync,
+    parametrize
 });
 
 
@@ -71,3 +79,7 @@ function logAndExecSync(command , options = {}) {
     console.log(`Executing: ${command}`);
     return execSync(command, options);
 }   
+
+function collect(value, previous) {
+    return previous.concat([value]);
+}
