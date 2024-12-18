@@ -62,3 +62,6 @@ typings/
 
 # Test results
 test-results/
+
+# Dist directory
+dist/
