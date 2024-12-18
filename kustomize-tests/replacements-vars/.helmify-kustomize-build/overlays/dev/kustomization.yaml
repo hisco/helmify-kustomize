@@ -1,0 +1,20 @@
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - service.yaml
+configMapGenerator:
+- name: dev-environment-values
+  env: .env
+replacements:
+- source:
+    fieldPath: data.APP_NAME
+    kind: ConfigMap
+    name: dev-environment-values
+  targets:
+  - fieldPaths:
+    - spec.selector.app
+    select:
+      kind: Service
+      name: nginx-service

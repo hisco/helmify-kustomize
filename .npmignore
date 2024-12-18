@@ -1,0 +1,7 @@
+node_modules
+kustomize-tests
+src
+tests
+test-results
+example
+jest.config.ts

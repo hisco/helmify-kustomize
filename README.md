@@ -2,7 +2,7 @@
 # helmify-kustomize
 
 `helmify-kustomize` is a cli tool designed to make a Kustomize folder compatible with Helm. This tool allows you to upload (pack) a Kustomize folder into an Helm chart format without manually converting it.
-This to enjoy both the philosophy of kustomize and the shipping functionality of helm.
+This to enjoy both the philosophy of kustomize and the shipping/deployment functionality of helm.
 
 ## Features
 
@@ -10,6 +10,7 @@ This to enjoy both the philosophy of kustomize and the shipping functionality of
 - Packs all overlays as a single chart.
 - Enables helm shipping functionality on a kustomize folder.
 - Support helm values with kustomize replacements.
+- Built in helm values to enable advanced functionality (Read more below).
 
 ## Installation
 
@@ -49,7 +50,7 @@ npx helmify-kustomize ./kustomize-folder --chart-name example-service --target .
 This command processes the Kustomize overlays and base configuration, then outputs the Helm-compatible files to the `helm-output` directory.
 
 ## How It Works
-
+The core logic is as follows:
 1. The module reads the overlays and base configuration from the current working directory.
 2. `kustomize` cli needs to be installed seperatly, `helmify-kustomize` executes `kustomize build` to process each overlay and the base configuration.
 3. The output overlays are then rendered wrapped as helm chart templates and written to the target folder as templates, with a single if..else condition to activate the specific overlay template.
@@ -111,14 +112,11 @@ By following these guidelines, you can ensure that your Helm chart names are val
 Kustomize Replacements are used to copy fields from one source into any number of specified targets.
 Combined with .env file you can use it to dynamically set values in your helm chart using helm values.
 
-During the build process the following happens:
-1. All configMapGenerator and secretGenerator fields are being read from the kustomization.yaml file
-2. All Replacements are being read from the kustomization.yaml file.
-3. ConfigMaps and Secrets are being created as helm templates with is using property accessors to access the values such as `{{ .Values.".env".propertyName | default "actual value from .env file" }}` with a default value of the actual value from the .env file.
-By the following logic:
-- If the property is only being used in a replacement, the property will be set as a placeholder in the helm template with no default value.
-- If the property is set in the .env file, the default value will be the value from the .env file.
-- property accessor is calculated based on the file name, and property name `{{ .Values.".env".propertyName }}`, supporting any file name and property name.
+Furing build process when the parametrize list is provided example `--parametrize devEnv=overlays/dev/.env --parametrize baseEnv=base/.env` the following happens:
+- The parametrize list is a list of pairs, the left side is the key of the value in the helm values, the right side is the path to the file to be read, `devEnv=overlays/dev/.env` will set the value of `devEnv` in the helm values to the value of the `.env` file in the `overlays/dev` folder.
+- Each of the files in the parametrize list is being read and the values are being randomly set during the kustomize build process.
+- The core logic wraps the results of all overlays into a single helm chart.
+- The random values are replaced with the property accessor based on the left side of the pair `{{ .Values.devEnv.propertyName }}` with a default value of the actual value from the .env file.
 
 Example:
 Your kustomization.yaml file contains the following:
@@ -129,7 +127,7 @@ configMapGenerator:
   - .env
 replacements:
   - source:
-      fieldPath: data.NAMESPACE
+      fieldPath: data.EXAMPLE_PROPERTY
       kind: ConfigMap
       name: example-configmap
     targets:
@@ -143,9 +141,13 @@ replacements:
 ```
 
 Your .env file contains the following:
-(Notice we are missing the NAMESPACE property in the .env file)
 ```
 EXAMPLE_PROPERTY=example_value
+```
+
+Building the kustomize folder with the following command:
+```sh
+npx helmify-kustomize ./kustomize-folder --chart-name example-service --target ./helm-chart --parametrize devEnv=overlays/dev/.env
 ```
 
 After the build process the following helm template is created:
@@ -155,12 +157,14 @@ apiVersion: v1
 metadata:
   name: example-configmap
 data:
-  EXAMPLE_PROPERTY: {{ .Values.".env".EXAMPLE_PROPERTY | default "example_value" }}
-  NAMESPACE: {{ .Values.".env".NAMESPACE }}
+  EXAMPLE_PROPERTY: {{ .Values.devEnv.EXAMPLE_PROPERTY }}
 ```
-Notice:
-- For EXAMPLE_PROPERTY default value is being set from the .env file.
-- For NAMESPACE there is no default value set, so it will be empty.
+
+This is the relevant part of the Values.yaml file that is created:
+```yaml
+devEnv:
+  EXAMPLE_PROPERTY: example_value
+```
 
 
 ## Contributing

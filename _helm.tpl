@@ -138,7 +138,7 @@ manifests:
 {{- end }}
 {{- end }}
 
-{{- $all := fromYaml (include "yamls" (dict "overlay" .Values.overlay) ) }}
+{{- $all := fromYaml (include "yamls" .Values ) }}
 {{- $kustomizeFiles := fromYaml (include "kustomizeFiles" dict ) }}
 
 {{- if .Values.manifests }}

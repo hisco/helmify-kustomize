@@ -1,6 +1,6 @@
 
-{{- $all := fromYaml (include "yamls" (dict "Values" .Values) ) }}
-{{- $kustomizeFiles := fromYaml (include "kustomizeFiles" (dict "Values" .Values) ) }}
+{{- $all := fromYaml (include "yamls" (dict "overlay" .Values.overlay) ) }}
+{{- $kustomizeFiles := fromYaml (include "kustomizeFiles" dict ) }}
 
 {{- if .Values.manifests }}
 {{- range $key, $manifest := .Values.manifests }}

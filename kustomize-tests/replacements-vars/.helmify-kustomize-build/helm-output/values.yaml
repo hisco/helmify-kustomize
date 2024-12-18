@@ -1,0 +1,24 @@
+devEnv:
+  APP_NAME: my-app
+baseEnv:
+  IMAGE_URL: nginx:1.14.2
+  TEST: ""
+# Few usage examples:
+# overlay: base
+# kustomizeFiles:
+#   include: true
+#   printNames:
+#     - overlays/dev
+#     - base
+# globals:
+#   namePrefix: prefix-
+#   nameSuffix: end
+#   nameReleasePrefix: true
+#   labels:
+#     key: 2
+#   annotations:
+#     key: 5
+# manifests:
+#   - kind: manifest
+# crds:
+#   - kind: test
