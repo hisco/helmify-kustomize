@@ -108,6 +108,20 @@ appVersion: 1.0.0
 
 By following these guidelines, you can ensure that your Helm chart names are valid and compatible with Helm and Kubernetes naming conventions.
 
+## Built in helm values
+
+`helmify-kustomize` comes with a built in helm values file that is used to set the values for the helm chart.
+The file is named `values.yaml` and is located in the target folder.
+
+- `Values.overlay` : This is the name of the overlay that is been deployed, example `overlays/dev` or `overlays/prod`.
+- `Values.globals.namespace` : Specify the namespace in all resources.
+- `Values.globals.namePrefix` : Prepends the value to the names of all resources and references.
+- `Values.globals.nameSuffix` : Appends the value to the names of all resources and references.
+- `Values.globals.nameReleasePrefix` : Prepends the value to the name of the release.
+- `Values.globals.labels` : Specify the labels in all resources.
+- `Values.globals.annotations` : Specify the annotations in all resources.
+
+
 ## Kustomize replacements with helm values
 
 Kustomize Replacements are used to copy fields from one source into any number of specified targets.

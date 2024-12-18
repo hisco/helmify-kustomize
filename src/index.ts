@@ -135,9 +135,18 @@ export async function wrapKustomizeIntoHelm({
     Array.from(groups.entries()).map(([key, value]) => [key, Object.fromEntries(value.map(o => [o.key, o.before[o.key]]))])
   );
 
+  const prefixDocs = trimIndent(`|# globals:
+    |#  namespace: "namespace"
+    |#  namePrefix: "namePrefix"
+    |#  nameSuffix: "nameSuffix"
+    |#  nameReleasePrefix: "nameReleasePrefix"
+    |#  labels:
+    |#    key: "label"
+    |#  annotations:
+    |#    key: "annotation"`)
   fs.writeFileSync(
     path.join(cwd, targetFolder, 'values.yaml'),
-    trimIndent(yamlStringify({
+    prefixDocs+"\n"+trimIndent(yamlStringify({
       overlay: '',
       ...valuesYamlObj,
     })),
