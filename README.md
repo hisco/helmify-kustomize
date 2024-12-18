@@ -40,6 +40,7 @@ npx helmify-kustomize <context> --target <targetFolder>
 - `--target <targetFolder>`: Target folder for output files (default: `helm-output`).
 - `-k-[name] *` : any flag will be forwarded to the kustomize build command `-k-something` is converted to `-something`
 - `--k-[name] *` : any flag will be forwarded to the kustomize build command `--k-something` is converted to `--something`
+- `--parametrize <key>=<path>` : This flag is used to parametrize .env files into the helm values.
 
 ### Example
 
