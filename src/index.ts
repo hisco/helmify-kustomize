@@ -143,7 +143,18 @@ export async function wrapKustomizeIntoHelm({
     |#  labels:
     |#    key: "label"
     |#  annotations:
-    |#    key: "annotation"`)
+    |#    key: "annotation"
+    |#  images:
+    |#    - image: "old-image"
+    |#      newName: "new-image"
+    |#      newTag: "new-tag"
+    |#      digest: "digest"
+    |#      pullSecrets:
+    |#        - name: "pull-secret"
+    |#  resources:
+    |#    - name: "resource"
+    |#      version: "v1"
+    |#      kind: "Resource"`)
   fs.writeFileSync(
     path.join(cwd, targetFolder, 'values.yaml'),
     prefixDocs+"\n"+trimIndent(yamlStringify({

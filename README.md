@@ -113,6 +113,11 @@ By following these guidelines, you can ensure that your Helm chart names are val
 `helmify-kustomize` comes with a built in helm values file that is used to set the values for the helm chart.
 The file is named `values.yaml` and is located in the target folder.
 
+This allows for a lot of flexibility in the helm chart, for example you can set the namespace, namePrefix, nameSuffix, nameReleasePrefix, labels, annotations, images, manifests, resources even after the chart is uploaded to a chart repository.
+
+
+If you think that something is missing and should be added to the built in helm values, please open an issue or a pull request.
+
 - `Values.overlay` : This is the name of the overlay that is been deployed, example `overlays/dev` or `overlays/prod`.
 - `Values.globals.namespace` : Specify the namespace in all resources.
 - `Values.globals.namePrefix` : Prepends the value to the names of all resources and references.
@@ -120,14 +125,64 @@ The file is named `values.yaml` and is located in the target folder.
 - `Values.globals.nameReleasePrefix` : Prepends the value to the name of the release.
 - `Values.globals.labels` : Specify the labels in all resources.
 - `Values.globals.annotations` : Specify the annotations in all resources.
+- `Values.images` : Specify the images to be updated in the helm chart, simillar to kustomize images section, see example below.
+- `Values.manifests` : Specify the manifests to be added to your deployment, these manifests will go through the rest of the pipeline, i.e. they will be affected by the `globals` and `images` sections.
+- `Values.resources` : Specify the resources to be added to your deployment, these resources will be added as is to the deployment they will not go through the rest of the pipeline.
 
+### Example of what is possilbe to set in the `values.yaml` file
+```yaml
+overlay: overlays/dev
+globals:
+  namespace: dev
+  namePrefix: dev-
+  nameSuffix: -dev
+  nameReleasePrefix: dev-
+  labels:
+    app: dev
+  annotations:
+    app: dev
+images:
+  - image: . # this will catch all images in all deployment
+    pullSecrets: # this will add the pull secrets to all pods
+      - name: new-pull-secret
+  - image: old-image # this will catch all images in all deployment with the old-image name
+    newName: new-image
+    newTag: new-tag
+    digest: new-digest
+manifests:
+  - kind: Deployment # this will be added to result and go through the rest of the pipeline manipulations
+    name: example-deployment
+    spec:
+      template:
+        spec:
+          containers:
+            - name: example-container
+              image: example-image
+resources:
+  - kind: Deployment # this will be added to result as is
+    name: example-deployment
+    spec:
+      template:
+        spec:
+          containers:
+            - name: example-container
+              image: example-image
+```
+
+### Example of how to set these values with the helm set command
+
+Here demonstrated only a few of the possible values, but you can set any of the values in the `values.yaml` file.
+
+```sh
+helm upgrade --install example-service ./helm-chart --set globals.namespace=new-namespace --set globals.namePrefix=new-name-prefix
+```
 
 ## Kustomize replacements with helm values
 
 Kustomize Replacements are used to copy fields from one source into any number of specified targets.
 Combined with .env file you can use it to dynamically set values in your helm chart using helm values.
 
-Furing build process when the parametrize list is provided example `--parametrize devEnv=overlays/dev/.env --parametrize baseEnv=base/.env` the following happens:
+During build process when the parametrize list is provided example `--parametrize devEnv=overlays/dev/.env --parametrize baseEnv=base/.env` the following happens:
 - The parametrize list is a list of pairs, the left side is the key of the value in the helm values, the right side is the path to the file to be read, `devEnv=overlays/dev/.env` will set the value of `devEnv` in the helm values to the value of the `.env` file in the `overlays/dev` folder.
 - Each of the files in the parametrize list is being read and the values are being randomly set during the kustomize build process.
 - The core logic wraps the results of all overlays into a single helm chart.
