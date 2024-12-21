@@ -5,3 +5,4 @@ tests
 test-results
 example
 jest.config.ts
+tsconfig.json
