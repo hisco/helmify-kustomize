@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const { Command } = require('commander');
-const { wrapKustomizeIntoHelm } = require('../src/index');
+const { wrapKustomizeIntoHelm } = require('../dist/index');
 const { execSync } = require('child_process');
 
 // Configure command-line arguments
@@ -30,9 +30,6 @@ if (action!= 'build') {
 const options = program.opts();
 const parametrize = options.parametrize || [];
 
-// Add more detailed logging
-console.log('Parametrize flags:', parametrize);
-console.log('Number of parametrize flags:', parametrize.length);
 
 // Get current working directory
 const cwd = process.cwd();
@@ -76,7 +73,6 @@ wrapKustomizeIntoHelm({
 
 
 function logAndExecSync(command , options = {}) {
-    console.log(`Executing: ${command}`);
     return execSync(command, options);
 }   
 

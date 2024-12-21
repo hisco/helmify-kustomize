@@ -29,7 +29,7 @@ kustomize-folder
 
 You can run the following command to convert it to a helm chart:
 ```sh
-npx helmify-kustomize ./kustomize-folder --chart-name example-service --target ./helm-chart
+npx helmify-kustomize build ./kustomize-folder --chart-name example-service --target ./helm-chart
 ```
 
 This will create a helm chart in the `helm-chart` folder in the target folder `./helm-chart`.
@@ -59,12 +59,12 @@ helm push example-service-0.1.0.tgz oci://<registry>/<repository>
 
 Easiest, no installation (other then nodejs ) just use it with `npx`
 ```sh
-npx helmify-kustomize <context> --chart-name example-service --target <targetFolder>
+npx helmify-kustomize build <context> --chart-name example-service --target <targetFolder>
 ```
 You can install it globally
 ```sh
 npm i -g helmify-kustomize
-helmify-kustomize <context> --chart-name example-service --target <targetFolder>
+helmify-kustomize build <context> --chart-name example-service --target <targetFolder>
 ```
 
 ## Usage
@@ -72,7 +72,7 @@ helmify-kustomize <context> --chart-name example-service --target <targetFolder>
 To use the module, run the following command:
 
 ```sh
-npx helmify-kustomize <context> --target <targetFolder>
+npx helmify-kustomize build <context> --target <targetFolder>
 ```
 
 ### Options
@@ -88,7 +88,7 @@ npx helmify-kustomize <context> --target <targetFolder>
 ### Example
 
 ```sh
-npx helmify-kustomize ./kustomize-folder --chart-name example-service --target ./helm-chart
+npx helmify-kustomize build ./kustomize-folder --chart-name example-service --target ./helm-chart
 ```
 
 This command processes the Kustomize overlays and base configuration, then outputs the Helm-compatible files to the `helm-output` directory.
@@ -260,7 +260,7 @@ EXAMPLE_PROPERTY=example_value
 
 Building the kustomize folder with the following command:
 ```sh
-npx helmify-kustomize ./kustomize-folder --chart-name example-service --target ./helm-chart --parametrize devEnv=overlays/dev/.env
+npx helmify-kustomize build ./kustomize-folder --chart-name example-service --target ./helm-chart --parametrize devEnv=overlays/dev/.env
 ```
 
 After the build process the following helm template is created:
