@@ -4,6 +4,49 @@
 `helmify-kustomize` is a cli tool designed to make a Kustomize folder compatible with Helm. This tool allows you to upload (pack) a Kustomize folder into an Helm chart format without manually converting it.
 This to enjoy both the philosophy of kustomize and the shipping/deployment functionality of helm.
 
+## TL;DR
+
+You have a standard kustomize folder and you want to convert it to a helm chart, you can do it with this tool.
+Let's assume this is your kustomize folder structure:
+```
+kustomize-folder
+└── base
+|   ├── kustomization.yaml
+|   |   ├── .env
+|   |   ├── configmap.yaml
+|   |   ├── service.yaml
+|   |   └── deployment.yaml
+├── overlays
+│   ├── dev
+│   │   ├── kustomization.yaml
+│   │   ├── deployment-patch.yaml
+│   │   └── .env
+│   └── prod
+│       ├── kustomization.yaml
+│       ├── deployment-patch.yaml
+│       └── .env
+```
+
+You can run the following command to convert it to a helm chart:
+```sh
+npx helmify-kustomize ./kustomize-folder --chart-name example-service --target ./helm-chart
+```
+
+This will create a helm chart in the `helm-chart` folder in the target folder `./helm-chart`.
+You can now use the helm chart to deploy your application.
+
+Upgrade the chart with the following command:
+```sh
+helm upgrade --install example-service ./helm-chart
+```
+
+Or Create a package and push it to a chart repository:
+```sh
+helm package ./helm-chart
+helm push example-service-0.1.0.tgz oci://<registry>/<repository>
+```
+
+
 ## Features
 
 - Processes each Kustomize overlays and base configurations and outputs Helm-compatible files based on provided templates.
