@@ -4,6 +4,9 @@
 `helmify-kustomize` is a cli tool designed to make a Kustomize folder compatible with Helm. This tool allows you to upload (pack) a Kustomize folder into an Helm chart format without manually converting it.
 This to enjoy both the philosophy of kustomize and the shipping/deployment functionality of helm.
 
+[![npm version](https://img.shields.io/npm/v/helmify-kustomize.svg?style=flat-square)](https://www.npmjs.org/package/helmify-kustomize)
+[![Known Vulnerabilities](https://snyk.io/test/npm/helmify-kustomize/badge.svg)](https://snyk.io/test/npm/helmify-kustomize)
+
 ## TL;DR
 
 You have a standard kustomize folder and you want to convert it to a helm chart, you can do it with this tool.
