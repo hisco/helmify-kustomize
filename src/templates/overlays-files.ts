@@ -18,8 +18,8 @@ interface OverlayResult {
  * @property {string} content - The raw YAML content generated from building the overlay
  */
 
-export const overlaysResults = (overlayResults: OverlayResult[]): string => {
-  return trimIndent(`|{{- define "yamls" }}
+export const overlaysResults = (chartPrefix: string, overlayResults: OverlayResult[]): string => {
+  return trimIndent(`|{{- define "${chartPrefix}.yamls" }}
         |{{- if .Values.overlay }}
         |${overlayResults
           .map(({ overlay, content }) => singleOverlay(overlay, content))

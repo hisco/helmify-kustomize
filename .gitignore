@@ -59,6 +59,7 @@ typings/
 
 # dotenv environment variables file
 .env
+!kustomize-tests/**/.env
 
 # Test results
 test-results/

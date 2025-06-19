@@ -1,6 +1,6 @@
 {
   "name": "helmify-kustomize",
-  "version": "1.0.16",
+  "version": "1.0.64",
   "description": "",
   "main": "index.js",
   "scripts": {

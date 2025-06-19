@@ -13,11 +13,14 @@ program
     .allowUnknownOption() // To allow unknown options for parsing kustomize options
     .argument('[action]', 'build creates a chart folder', '.')
     .argument('[directory]', 'Path to kustomization directory', '.')
+    .option('--clear', 'Clear target folder', false)
     .option('--chart-name <chartName>', 'The name of the chart', '')
     .option('--chart-version <chartVersion>', 'The version of the chart', '0.1.0')
     .option('--chart-description <chartDescription>', 'The description of the chart', 'A Helm chart for Kubernetes')
     // add a list of files to parametrize, example --parametrize devEnv=overlays/dev/.env --parametrize baseEnv=base/.env
     .option('--parametrize <parametrize>', 'List of files to parametrize', collect, [])
+    // add overlay filter option, example --overlay-filter staging,prod
+    .option('--overlay-filter <overlayFilter>', 'Comma-separated list of overlay names to include (e.g., "overlays/staging,overlays/prod")')
     .action((actionArg, directoryArg ) => {
         directory = directoryArg
         action = actionArg
@@ -33,12 +36,6 @@ const parametrize = options.parametrize || [];
 
 // Get current working directory
 const cwd = process.cwd();
-
-// validate minimum required options [chartName] 
-if (!options.chartName) {
-    console.error('--chart-name is required');
-    process.exit(1);
-}
 
 
 // Call the function with provided arguments
@@ -68,7 +65,9 @@ wrapKustomizeIntoHelm({
     chartDescription: options.chartDescription,
     fs: require('fs'),
     execSync: logAndExecSync,
-    parametrize
+    parametrize,
+    overlayFilter: options.overlayFilter,
+    clearTargetFolder: options.clear
 });
 
 

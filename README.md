@@ -1,4 +1,3 @@
-
 # helmify-kustomize
 
 `helmify-kustomize` is a cli tool designed to make a Kustomize folder compatible with Helm. This tool allows you to upload (pack) a Kustomize folder into an Helm chart format without manually converting it.
@@ -57,6 +56,7 @@ helm push example-service-0.1.0.tgz oci://<registry>/<repository>
 - Enables helm shipping functionality on a kustomize folder.
 - Support helm values with kustomize replacements.
 - Built in helm values to enable advanced functionality (Read more below).
+- **NEW: Overlay filtering** - Process only specific overlays
 
 ## Installation
 
@@ -87,6 +87,7 @@ npx helmify-kustomize build <context> --target <targetFolder>
 - `-k-[name] *` : any flag will be forwarded to the kustomize build command `-k-something` is converted to `-something`
 - `--k-[name] *` : any flag will be forwarded to the kustomize build command `--k-something` is converted to `--something`
 - `--parametrize <key>=<path>` : This flag is used to parametrize .env files into the helm values.
+- `--overlay-filter <filter>` : Comma-separated list of overlay names to include
 
 ### Example
 
@@ -290,3 +291,94 @@ Contributions are welcome! Please submit a pull request or open an issue to disc
 ## License
 
 This project is licensed under the MIT License.
+
+## Examples
+
+### Example 1: Single Overlay Filter
+
+```bash
+helmify-kustomize \
+  --directory ./my-kustomize \
+  --target-folder ./my-helm-chart \
+  --chart-name my-app \
+  --chart-version 1.0.0 \
+  --overlay-filter staging
+```
+
+### Example 2: Multiple Overlay Filter
+
+```bash
+helmify-kustomize \
+  --directory ./my-kustomize \
+  --target-folder ./my-helm-chart \
+  --chart-name my-app \
+  --chart-version 1.0.0 \
+  --overlay-filter staging,prod
+```
+
+### Example 3: With Parameterization
+
+```bash
+helmify-kustomize \
+  --directory ./my-kustomize \
+  --target-folder ./my-helm-chart \
+  --chart-name my-app \
+  --chart-version 1.0.0 \
+  --overlay-filter dev \
+  --parametrize devEnv=overlays/dev/.env
+```
+
+### Practical Example
+
+Given a Kustomize directory structure:
+
+```
+my-kustomize/
+├── base/
+│   ├── kustomization.yaml
+│   ├── deployment.yaml
+│   └── service.yaml
+└── overlays/
+    ├── dev/
+    │   ├── kustomization.yaml
+    │   └── .env
+    ├── staging/
+    │   ├── kustomization.yaml
+    │   └── .env
+    ├── prod/
+    │   ├── kustomization.yaml
+    │   └── .env
+    └── test/
+        ├── kustomization.yaml
+        └── .env
+```
+
+**Process only staging and prod overlays:**
+```bash
+helmify-kustomize \
+  --directory ./my-kustomize \
+  --target-folder ./my-helm-chart \
+  --chart-name my-app \
+  --chart-version 1.0.0 \
+  --overlay-filter staging,prod
+```
+
+**Process only the dev overlay:**
+```bash
+helmify-kustomize \
+  --directory ./my-kustomize \
+  --target-folder ./my-helm-chart \
+  --chart-name my-app \
+  --chart-version 1.0.0 \
+  --overlay-filter dev
+```
+
+**Process all overlays (default behavior):**
+```bash
+helmify-kustomize \
+  --directory ./my-kustomize \
+  --target-folder ./my-helm-chart \
+  --chart-name my-app \
+  --chart-version 1.0.0
+  # No --overlay-filter specified, processes all overlays
+```

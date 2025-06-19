@@ -19,8 +19,8 @@ interface KustomizeFile {
  * @returns {string} A Helm template string containing the Kustomize configurations
  */
 
-export const kustomizeFiles = (files: KustomizeFile[]): string => {
-  return trimIndent(`|{{- define "kustomizeFiles" }}
+export const kustomizeFiles = (chartPrefix: string, files: KustomizeFile[]): string => {
+  return trimIndent(`|{{- define "${chartPrefix}.kustomizeFiles" }}
         |${
           stringify({
             manifests: files.map(({ folder, filePath, content }) => {

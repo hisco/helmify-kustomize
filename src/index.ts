@@ -3,11 +3,13 @@
 import * as cp from 'child_process';
 import * as dotenv from 'dotenv';
 import * as path from 'path';
-import { stringify as yamlStringify } from 'yaml';
+import * as os from 'os';
+import { stringify as yamlStringify, parse as yamlParse } from 'yaml';
 import { trimIndent } from './lang';
 import { kustomizeFiles } from './templates/kustomize-files';
 import { overlaysResults } from './templates/overlays-files';
 import { FS, fsDefault, groupBy, randomString } from './utils';
+import { yamlResult } from './templates/result-yaml';
 
 
 /**
@@ -23,6 +25,7 @@ import { FS, fsDefault, groupBy, randomString } from './utils';
  * @property {FS} [fs] - Optional filesystem interface for testing
  * @property {typeof cp.execSync} [execSync] - Optional exec function for testing
  * @property {string[]} [parametrize] - Optional array of values to parametrize
+ * @property {string} [overlayFilter] - Optional comma-separated list of overlay names to include (e.g., "staging,prod")
  */
 
 interface WrapKustomizeOptions {
@@ -36,6 +39,8 @@ interface WrapKustomizeOptions {
   fs?: FS;
   execSync?: typeof cp.execSync;
   parametrize?: string[];
+  overlayFilter?: string;
+  clearTargetFolder?: boolean;
 }
 /**
  * Result of parametrizing a value in a Kustomize configuration
@@ -69,15 +74,26 @@ export async function wrapKustomizeIntoHelm({
   fs = fsDefault,
   execSync = cp.execSync,
   parametrize = [],
+  clearTargetFolder = false,
+  overlayFilter,
 }: WrapKustomizeOptions): Promise<void> {
+  // chart prefix should be random string of letters only of 10 chars
   const kustomizeDir = /^\./.test(directory) ? path.resolve(cwd, directory) : directory;
-  const tempFolder = path.join(kustomizeDir, '.helmify-kustomize-build');
+  const tempFolder = path.join(os.tmpdir(), '.helmify-kustomize-build');
 
   const targetTemplatesFolder = path.join(cwd, targetFolder, 'templates');
   copyFolder(fs, kustomizeDir, tempFolder, (src) => !src.includes('.helmify-kustomize-build'));
 
   const overlaysDir = path.join(tempFolder, 'overlays');
-  const overlays = fs.readdirSync(overlaysDir).filter((file) => fs.statSync(path.join(overlaysDir, file)).isDirectory());
+  const allOverlays = fs.readdirSync(overlaysDir).filter((file: string) => fs.statSync(path.join(overlaysDir, file)).isDirectory());
+
+  // Filter overlays based on overlayFilter parameter
+  const overlays = overlayFilter
+    ? allOverlays.filter((overlay: string) => {
+      const allowedOverlays = overlayFilter.split(',').map((name: string) => name.trim());
+      return allowedOverlays.indexOf(`overlays/${overlay}`) !== -1;
+    })
+    : allOverlays;
 
   const kustomizeCliOptions = Object.entries(kustomizeOptions)
     .map(([key, value]) => `${key} ${value}`)
@@ -99,7 +115,7 @@ export async function wrapKustomizeIntoHelm({
       parametrizeResults.push({ valuesProp, before, after, key });
     });
 
-    fs.writeFileSync(envPath, Object.entries(after).map(([k, v]) => `${k}=${v}`).join('\n'), 'utf8');
+    fs.writeFileSync(envPath, Object.entries(after).map(([k, v]: [string, string]) => `${k}=${v}`).join('\n'), 'utf8');
   });
 
   const paramsRegex = new RegExp(Object.keys(mapRandomStringsToParametrize).join('|'), 'g');
@@ -108,32 +124,92 @@ export async function wrapKustomizeIntoHelm({
     content.replace(paramsRegex, (match) => {
       const param = mapRandomStringsToParametrize[match];
       if (!param) return match;
-      return `{{ .Values.${param.valuesProp}.${param.key} }}`;
+      // {{- if .Values.myProp }}{{ .Values.myProp | quote }}{{- end }}
+      const key = `.Values${ isValuePropRoot(param.valuesProp) ? '' : `.${param.valuesProp}`}.${param.key}`;
+
+      // dynamiclly do something like this: {{ if kindIs "string" .Values.myProp }}{{ .Values.myProp | quote }}{{ else }}{{ .Values.myProp }}{{ end }}
+      return `{{ if kindIs "string" ${key} }}{{ ${key} | quote }}{{ else }}{{ ${key} }}{{ end }}`;
     });
 
   const kustomizeManifestsResults = await Promise.all(
-    overlays.map(async (overlay) => {
+    overlays.map(async (overlay: string) => {
       const overlayPath = path.join(overlaysDir, overlay);
       const output = execSync(`kustomize build ${overlayPath} ${kustomizeCliOptions}`, { encoding: 'utf-8', cwd: tempFolder });
       return { overlay: `overlays/${overlay}`, content: replaceParams(output) };
     })
   );
 
-  const resultContent = overlaysResults(kustomizeManifestsResults);
+  if (clearTargetFolder) {
+    fs.rmSync(targetTemplatesFolder, { recursive: true, force: true });
+  }
+  // if Chart.yaml exists in kustomizeDir copy it, otherwise create a new one
+  const kustomizeChartYaml = path.join(kustomizeDir, 'Chart.yaml');
+  if (fs.existsSync(kustomizeChartYaml)) {
+    fs.copyFileSync(kustomizeChartYaml, path.join(cwd, targetFolder, 'Chart.yaml'));
+    const chartYaml = fs.readFileSync(path.join(cwd, targetFolder, 'Chart.yaml'), 'utf8');
+    const chartYamlObj = yamlParse(chartYaml) as Record<string, string>;
+    // if chartVersion is set then update it
+    if (chartVersion) {
+      chartYamlObj.version = chartVersion;
+      fs.writeFileSync(path.join(cwd, targetFolder, 'Chart.yaml'), trimIndent(yamlStringify(chartYamlObj)), 'utf8');
+    }
+    // else get the values
+    else {
+      chartVersion = chartYamlObj.version;
+      chartName = chartYamlObj.name;
+    }
+  } else {
+    if (typeof chartName !== 'string') {
+      console.error(`chartName is required when Chart.yaml does not exist in kustomizeDir`);
+      throw new Error(`chartName is required when Chart.yaml does not exist in kustomizeDir`);
+    }
+    if (typeof chartVersion !== 'string') {
+      console.error(`chartVersion is required when Chart.yaml does not exist in kustomizeDir`);
+      throw new Error(`chartVersion is required when Chart.yaml does not exist in kustomizeDir`);
+    }
+    fs.writeFileSync(
+      path.join(cwd, targetFolder, 'Chart.yaml'),
+      trimIndent(`|apiVersion: v2\n|name: ${chartName}\n|version: ${chartVersion}\n|description: ${chartDescription}`),
+      'utf8'
+    );
+  }
+  const chartPrefix = `${chartName}-${chartVersion}`;
+
+  const resultContent = overlaysResults(chartPrefix, kustomizeManifestsResults);
   fs.mkdirSync(targetTemplatesFolder, { recursive: true });
-  fs.writeFileSync(path.join(targetTemplatesFolder, '_overlays-content.tpl'), resultContent, 'utf8' );
+  fs.writeFileSync(path.join(targetTemplatesFolder, '_overlays-content.tpl'), resultContent, 'utf8');
+
+
+  const resultYamlContent = yamlResult(chartPrefix);
+  fs.writeFileSync(path.join(targetTemplatesFolder, 'result.yaml'), resultYamlContent, 'utf8');
 
   const kustomizationFiles = getKustomizationFiles(fs, kustomizeDir);
-  const kustomizeHelperContent = kustomizeFiles(kustomizationFiles);
+  const kustomizeHelperContent = kustomizeFiles(chartPrefix, kustomizationFiles);
   fs.writeFileSync(path.join(targetTemplatesFolder, '_kustomize-files.tpl'), kustomizeHelperContent, 'utf8');
 
   // copy from static to targetTemplatesFolder
-  copyFolder(fs, path.join(__dirname, 'static'), targetTemplatesFolder);
-  
+  try {
+    copyFolder(fs, path.join(__dirname, '..', 'static'), targetTemplatesFolder);
+  } catch (e) {
+    console.error(`static folder does not exist`);
+  }
+
   const groups = groupBy(parametrizeResults, (o) => o.valuesProp);
-  const valuesYamlObj = Object.fromEntries(
-    Array.from(groups.entries()).map(([key, value]) => [key, Object.fromEntries(value.map(o => [o.key, o.before[o.key]]))])
-  );
+  const valuesYamlObj: Record<string, any> = {};
+  Array.from(groups.entries()).forEach(([key, value]) => {
+    // if key is undefined, it means that the value is on the .Values object
+    if (isValuePropRoot(key)) {
+      value.forEach(o => {
+        valuesYamlObj[o.key] = o.before[o.key];
+      });
+    }
+    else {
+      valuesYamlObj[key] = {};
+      value.forEach(o => {
+        valuesYamlObj[key][o.key] = o.before[o.key];
+      });
+    }
+  });
 
   const prefixDocs = trimIndent(`|# globals:
     |#  namespace: "namespace"
@@ -155,28 +231,43 @@ export async function wrapKustomizeIntoHelm({
     |#    - name: "resource"
     |#      version: "v1"
     |#      kind: "Resource"`)
+
+  // if values.yaml exists in kustomizeDir parse it and add to valuesYamlObj
+  const kustomizeValuesYaml = path.join(kustomizeDir, 'values.yaml');
+  let valuesYamlObjFromFile: any = {};
+  if (fs.existsSync(kustomizeValuesYaml)) {
+    try {
+      valuesYamlObjFromFile = yamlParse(fs.readFileSync(kustomizeValuesYaml, 'utf8')) as Record<string, string>;
+    } catch (e) {
+      console.error(`Error parsing source values.yaml: ${e}`);
+      console.error(`ignoring source values.yaml`);
+    }
+  }
+
   fs.writeFileSync(
     path.join(cwd, targetFolder, 'values.yaml'),
-    prefixDocs+"\n"+trimIndent(yamlStringify({
+    prefixDocs + "\n" + trimIndent(yamlStringify({
       overlay: '',
       ...valuesYamlObj,
+      ...valuesYamlObjFromFile,
     })),
     'utf8'
   );
 
-  fs.writeFileSync(
-    path.join(cwd,targetFolder, 'Chart.yaml'),
-    trimIndent(`|apiVersion: v2\n|name: ${chartName}\n|version: ${chartVersion}\n|description: ${chartDescription}`),
-    'utf8'
-  );
 }
 
 // Utility Functions
+function isValuePropRoot(valuesProp: string | undefined): boolean {
+  return valuesProp == undefined || valuesProp == '';
+}
 function copyFolder(fs: FS, source: string, target: string, filter: (src: string, dest: string) => boolean = () => true): void {
-  if (!fs.existsSync(source)) throw new Error(`Source folder does not exist: ${source}`);
+  if (!fs.existsSync(source)) {
+    console.error(`Source folder does not exist: ${source}`);
+    throw new Error(`Source folder does not exist: ${source}`);
+  }
   if (!fs.existsSync(target)) fs.mkdirSync(target, { recursive: true });
 
-  fs.readdirSync(source).forEach((entry) => {
+  fs.readdirSync(source).forEach((entry: string) => {
     const sourcePath = path.join(source, entry);
     const targetPath = path.join(target, entry);
 
@@ -196,7 +287,7 @@ function copyFolder(fs: FS, source: string, target: string, filter: (src: string
 function getKustomizationFiles(fs: FS, folder: string): { folder: string; filePath: string; content: string }[] {
   const result: { folder: string; filePath: string; content: string }[] = [];
   const scanDirectory = (directory: string) => {
-    fs.readdirSync(directory).forEach((file) => {
+    fs.readdirSync(directory).forEach((file: string) => {
       const filePath = path.join(directory, file);
       if (fs.statSync(filePath).isDirectory()) {
         scanDirectory(filePath);

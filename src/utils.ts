@@ -34,8 +34,6 @@ export function randomString(): string {
   return Math.random().toString(36).substring(2, 36);
 }
 
-
-
 /**
  * Interface representing the filesystem interface
  * @interface FS
@@ -48,6 +46,7 @@ export function randomString(): string {
  * @property {typeof fsDefault.readFileSync} readFileSync - The readFileSync method
  * @property {typeof fsDefault.unlinkSync} unlinkSync - The unlinkSync method
  * @property {typeof fsDefault.rmdirSync} rmdirSync - The rmdirSync method
+ * @property {typeof fsDefault.rmSync} rmSync - The rmSync method
  */
 export interface FS {
   readdirSync: typeof fsDefaultInternal.readdirSync;
@@ -59,5 +58,6 @@ export interface FS {
   readFileSync: typeof fsDefaultInternal.readFileSync;
   unlinkSync: typeof fsDefaultInternal.unlinkSync;
   rmdirSync: typeof fsDefaultInternal.rmdirSync;
+  rmSync: typeof fsDefaultInternal.rmSync;
 }
 export const fsDefault: FS = fsDefaultInternal;
