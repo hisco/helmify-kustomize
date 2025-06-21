@@ -1,5 +1,13 @@
+import { trimIndent } from '../lang';
 
-{{- define "filterManifests" }}
+/**
+ * Generates the content of the chart utils file
+ * @param {string} packageId - The id of the package that is used to prefix the helpers
+ * @returns {string} The content of the chart utils file
+ */
+export const chartUtils = (packageId: string): string => {
+  return trimIndent(`
+{{- define "${packageId}.filterManifests" }}
 {{- $filtered := list }}
 {{- range $i, $v := .manifests }}
   {{- $name := $v.metadata.folder }}
@@ -12,14 +20,14 @@ manifests:
 {{- end }}
 
 
-{{- define "printManifests" }}
+{{- define "${packageId}.printManifests" }}
 {{- range $key, $manifest := .manifests }}
 {{ toYaml $manifest.spec}}
 ---
 {{- end }}
 {{- end}}
 
-{{- define "ensureMetadata" }} 
+{{- define "${packageId}.ensureMetadata" }} 
 {{- /* gets manifestWarpper */}}
 {{- if .manifest.spec.metadata }}
 {{- else }}
@@ -27,13 +35,13 @@ manifests:
 {{- end }}
 {{- end}}
 
-{{- define "setNamespace" }} 
+{{- define "${packageId}.setNamespace" }} 
 {{- if .globals.namespace}}
 {{- $n := set .manifest.spec.metadata "namespace" .globals.namespace -}}
 {{- end }}
 {{- end }}
 
-{{- define "setNamePrefix" }} 
+{{- define "${packageId}.setNamePrefix" }} 
 {{- if .globals.namePrefix}}
 {{- if .manifest.spec.metadata.name }}
 {{- $n := set .manifest.spec.metadata "name" (print .globals.namePrefix .manifest.spec.metadata.name ) -}}
@@ -43,7 +51,7 @@ manifests:
 {{- end }}
 {{- end }}
 
-{{- define "setNameSuffix" }} 
+{{- define "${packageId}.setNameSuffix" }} 
 {{- if .globals.nameSuffix}}
 {{- if .manifest.spec.metadata.name }}
 {{- $n := set .manifest.spec.metadata "name" (print .manifest.spec.metadata.name .globals.nameSuffix) -}}
@@ -53,7 +61,7 @@ manifests:
 {{- end }}
 {{- end }}
 
-{{- define "nameReleasePrefix" }} 
+{{- define "${packageId}.nameReleasePrefix" }} 
 {{- if .globals.nameReleasePrefix}}
 {{- if .manifest.spec.metadata.name }}
 {{- $n := set .manifest.spec.metadata "name" (print .Values.Release.name "-" .manifest.spec.metadata.name) -}}
@@ -64,7 +72,7 @@ manifests:
 {{- end }}
 
 
-{{- define "labels" }} 
+{{- define "${packageId}.labels" }} 
 {{- if .globals.labels}}
 {{- if .manifest.spec.metadata.labels }}
 {{- else }}
@@ -74,7 +82,7 @@ manifests:
 {{- end }}
 {{- end }}
 
-{{- define "annotations" }} 
+{{- define "${packageId}.annotations" }} 
 {{- if .globals.annotations}}
 {{- if .manifest.spec.metadata.annotations }}
 {{- else }}
@@ -83,7 +91,24 @@ manifests:
 {{- $n := merge .manifest.spec.metadata.annotations .globals.annotations }}
 {{- end }}
 {{- end }}
-{{- define "updataImages" }} 
+
+
+{{- define "${packageId}.addStandardHeaders" -}}
+{{- if .manifest.spec.metadata.labels }}
+{{- else }}
+{{- $n := set .manifest.spec.metadata "labels" dict -}}
+{{- end }}
+{{- if or (not .globals) (not (eq .globals.addStandardHeaders false)) }}
+    {{- $n := set .manifest.spec.metadata.labels "helmify-kustomize.local/overlay" .Values.overlay }}
+{{- end}}
+{{- if or (not .globals) (not (eq .globals.addStandardHeaders false)) }}
+    {{- $n := set .manifest.spec.metadata.labels "app.kubernetes.io/name" .Chart.Name }}
+    {{- $n := set .manifest.spec.metadata.labels "app.kubernetes.io/instance" .Release.Name }}
+    {{- $n := set .manifest.spec.metadata.labels "app.kubernetes.io/version" .Chart.AppVersion  }}
+{{- end}}
+{{- end -}}
+
+{{- define "${packageId}.updataImages" }} 
 {{$images := .images}}
 {{- if and (hasKey .manifest.spec "spec") (hasKey .manifest.spec.spec "template") (hasKey .manifest.spec.spec.template "spec") (hasKey .manifest.spec.spec.template.spec "containers") }}
   {{- range $j, $container := .manifest.spec.spec.template.spec.containers }}
@@ -120,7 +145,7 @@ manifests:
 {{- end }}
 
 
-{{- define "image.name" -}}
+{{- define "${packageId}.image.name" -}}
 {{- $url := . -}}
 {{- $parts := split ":" $url -}}
 {{- $beforeDigest := $parts._0 -}}
@@ -129,7 +154,7 @@ manifests:
 {{- $beforeTagParts._0 -}}
 {{- end -}}
 
-{{- define "image.tag" -}}
+{{- define "${packageId}.image.tag" -}}
 {{- $url := . -}}
 {{- $parts := split ":" $url -}}
 {{- if gt (len $parts) 1 -}}
@@ -142,7 +167,7 @@ manifests:
 {{- end -}}
 {{- end -}}
 
-{{- define "image.digest" -}}
+{{- define "${packageId}.image.digest" -}}
 {{- $url := . -}}
 {{- $parts := split "@" $url -}}
 {{- if gt (len $parts) 1 -}}
@@ -151,3 +176,6 @@ manifests:
 {{- else -}}
 {{- end -}}
 {{- end -}}
+
+`);
+};

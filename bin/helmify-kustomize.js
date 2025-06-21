@@ -2,7 +2,7 @@
 const { Command } = require('commander');
 const { wrapKustomizeIntoHelm } = require('../dist/index');
 const { execSync } = require('child_process');
-
+const os = require('os');
 // Configure command-line arguments
 let directory = '.';
 let action = '';
@@ -15,7 +15,8 @@ program
     .argument('[directory]', 'Path to kustomization directory', '.')
     .option('--clear', 'Clear target folder', false)
     .option('--chart-name <chartName>', 'The name of the chart', '')
-    .option('--chart-version <chartVersion>', 'The version of the chart', '0.1.0')
+    .option('--chart-version <chartVersion>', 'The version of the chart', '0.0.1')
+    .option('--chart-app-version <chartAppVersion>', 'The app version of the chart', '0.0.1')
     .option('--chart-description <chartDescription>', 'The description of the chart', 'A Helm chart for Kubernetes')
     // add a list of files to parametrize, example --parametrize devEnv=overlays/dev/.env --parametrize baseEnv=base/.env
     .option('--parametrize <parametrize>', 'List of files to parametrize', collect, [])
@@ -62,12 +63,14 @@ wrapKustomizeIntoHelm({
     kustomizeOptions,
     chartName: options.chartName,
     chartVersion: options.chartVersion,
+    chartAppVersion: options.chartAppVersion,
     chartDescription: options.chartDescription,
     fs: require('fs'),
     execSync: logAndExecSync,
     parametrize,
     overlayFilter: options.overlayFilter,
-    clearTargetFolder: options.clear
+    clearTargetFolder: options.clear,
+    tmpFolder: os.tmpdir()
 });
 
 

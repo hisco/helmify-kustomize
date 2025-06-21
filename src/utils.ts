@@ -1,5 +1,6 @@
 
 import * as fsDefaultInternal from 'fs';
+import { createHash } from 'crypto';
 
 /**
  * Groups an array of items by a key derived from each item.
@@ -33,6 +34,18 @@ export function groupBy<T, K>(list: T[], keyGetter: (input: T) => K): Map<K, T[]
 export function randomString(): string {
   return Math.random().toString(36).substring(2, 36);
 }
+
+/**
+ * Generates a short hash of a string using SHA-256.
+ * @param content - The string to hash
+ * @returns A short hash of the string
+ * @example
+ * const hash = shortHash('Hello, world!'); // e.g. "a1b2c3d4e5"
+ */
+export function shortHash(content: string): string {
+  return createHash('sha256').update(content).digest('hex').substring(0, 10);
+}
+
 
 /**
  * Interface representing the filesystem interface

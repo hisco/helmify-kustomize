@@ -3,7 +3,9 @@ import { parse as parseYaml } from 'yaml';
 import { wrapKustomizeIntoHelm } from './index';
 import { fsDefault } from './utils';
 const { execSync } = require('child_process');
+import * as os from 'os';
 
+const tmpFolder = path.join(os.tmpdir());
 describe('wrapKustomizeIntoHelm', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -17,9 +19,11 @@ describe('wrapKustomizeIntoHelm', () => {
       kustomizeOptions: {},
       chartName: 'test-chart',
       chartVersion: '1.0.0',
+      chartAppVersion: '1.0.0',
       chartDescription: 'Test Chart',
       fs: fsDefault,
       execSync: execSync,
+      tmpFolder:path.resolve(process.cwd(),  'test-results/replacements-vars'),
     };
 
 
@@ -52,11 +56,13 @@ describe('wrapKustomizeIntoHelm', () => {
       kustomizeOptions: {},
       chartName: 'test-chart',
       chartVersion: '1.0.0',
+      chartAppVersion: '2.0.0',
       chartDescription: 'Test Chart',
       fs: fsDefault,
       execSync: execSync,
       parametrize: ['devEnv=overlays/dev/.env', 'baseEnv=base/.env'],
       overlayFilter: 'overlays/dev,base',
+      tmpFolder:path.resolve(process.cwd(),  'test-results/replacements-vars'),
     };
     await wrapKustomizeIntoHelm(options);
     const folder = path.resolve(options.cwd, options.targetFolder);
