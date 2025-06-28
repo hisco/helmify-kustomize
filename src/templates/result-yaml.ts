@@ -21,7 +21,6 @@ export const yamlResult = (chartPrefix: string , packageId: string): string => {
 {{- if $.Values.images }}
   {{- include "${packageId}.updataImages" (dict "manifest" $manifest "images" $.Values.images)}}
 {{- end}}
-{{- include "${packageId}.addStandardHeaders" (dict "manifest" $manifest "globals" $.Values.globals "Chart" $.Chart "Release" $.Release "Values" $.Values)}}
 {{- if $.Values.globals }}
 {{- include "${packageId}.setNamespace" (dict "manifest" $manifest "globals" $.Values.globals)}}
 {{- include "${packageId}.setNamePrefix" (dict "manifest" $manifest "globals" $.Values.globals)}}

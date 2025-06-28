@@ -157,7 +157,7 @@ export async function wrapKustomizeIntoHelm({
       // if the value is a string, then we need to quote it
       // if the value is not a string, then we need to use the value directly
       // dynamiclly do something like this: {{ if kindIs "string" .Values.myProp }}{{ .Values.myProp | quote }}{{ else }}{{ .Values.myProp }}{{ end }}
-      return `{{ if kindIs "string" ${key} }}{{ ${key} | quote }}{{ else }}{{ ${key} }}{{ end }}`;
+      return `{{ ${key} | quote }}`;
     });
 
   const kustomizeManifestsResults = await Promise.all(
