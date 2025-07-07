@@ -87,6 +87,7 @@ npx helmify-kustomize build <context> --target <targetFolder>
 - `-k-[name] *` : any flag will be forwarded to the kustomize build command `-k-something` is converted to `-something`
 - `--k-[name] *` : any flag will be forwarded to the kustomize build command `--k-something` is converted to `--something`
 - `--parametrize <key>=<path>` : This flag is used to parametrize .env files into the helm values.
+- `--parametrize-configmap <key>=<path>` : The falg is used parametrize the configmap in runtime by the key parameter in the .Values, read more about `disableNameSuffixHash`
 - `--overlay-filter <filter>` : Comma-separated list of overlay names to include
 
 ### Example
@@ -282,6 +283,117 @@ This is the relevant part of the Values.yaml file that is created:
 devEnv:
   EXAMPLE_PROPERTY: example_value
 ```
+
+## ConfigMap Parametrization
+
+The `--parametrize-configmap` flag allows you to make specific ConfigMaps in your Helm chart fully parametrizable through Helm values. This transforms static ConfigMap data into dynamic template expressions that are resolved at deployment runtime.
+
+### How It Works
+
+When you use `--parametrize-configmap <key>=<name>`, the tool:
+
+1. **Identifies the ConfigMap** by the specified `<name>` in your Kustomize output
+2. **Replaces all static data values** in that ConfigMap with Helm template expressions
+3. **Creates template expressions** that reference `.Values.<key>` for each data field
+4. **Requires you to provide the actual values** in your Helm values.yaml or at deployment time
+
+### Usage
+
+```bash
+npx helmify-kustomize build ./kustomize-folder \
+  --chart-name example-service \
+  --target ./helm-chart \
+  --parametrize-configmap appConfig=app-config \
+  --parametrize-configmap dbConfig=database-config
+```
+
+### Example
+
+**Input:** Your Kustomize generates a ConfigMap like:
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  APP_NAME: my-application
+  APP_VERSION: 1.0.0
+  DEBUG_MODE: false
+```
+
+**Command:**
+```bash
+npx helmify-kustomize build ./kustomize-folder \
+  --chart-name example-service \
+  --target ./helm-chart \
+  --parametrize-configmap appConfig=app-config
+```
+
+**Output:** Generated Helm template:
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  APP_NAME: {{ .Values.appConfig.APP_NAME }}
+  APP_VERSION: {{ .Values.appConfig.APP_VERSION }}
+  DEBUG_MODE: {{ .Values.appConfig.DEBUG_MODE }}
+```
+
+**Required:** You must provide the values in your `values.yaml`:
+```yaml
+appConfig:
+  APP_NAME: my-application
+  APP_VERSION: 1.0.0
+  DEBUG_MODE: false
+```
+
+### Deployment-Time Configuration
+
+The real power comes at deployment time when you can override these values:
+
+```bash
+helm upgrade --install my-app ./helm-chart \
+  --set appConfig.APP_NAME="production-app" \
+  --set appConfig.DEBUG_MODE="true"
+```
+
+Or using a custom values file:
+```bash
+helm upgrade --install my-app ./helm-chart -f custom-values.yaml
+```
+
+Where `custom-values.yaml` contains:
+```yaml
+appConfig:
+  APP_NAME: production-app
+  APP_VERSION: 2.0.0
+  DEBUG_MODE: true
+```
+
+### disableNameSuffixHash
+
+By default, Kustomize adds a hash suffix to ConfigMap names to trigger pod restarts when the ConfigMap content changes. When using `--parametrize-configmap`, you should disable this behavior to maintain consistent ConfigMap names that can be reliably referenced by the parametrization.
+
+Add `disableNameSuffixHash: true` to your ConfigMap generator in kustomization.yaml:
+
+```yaml
+configMapGenerator:
+- name: app-config
+  files:
+  - app.properties
+  options:
+    disableNameSuffixHash: true
+```
+
+This ensures that the ConfigMap name remains `app-config` instead of `app-config-abc123hash`, allowing the tool to correctly identify and parametrize the ConfigMap by its predictable name.
+
+### Best Practices
+
+1. **Use descriptive keys** for the parametrization (e.g., `appConfig`, `dbConfig`) to make values.yaml clear
+2. **Always set disableNameSuffixHash: true** for ConfigMaps you want to parametrize
+3. **Provide complete values** in your values.yaml since the ConfigMap data becomes fully dependent on Helm values
 
 
 ## Contributing

@@ -71,6 +71,21 @@ manifests:
 {{- end }}
 {{- end }}
 
+{{- define "${packageId}.updateConfigMap" }}
+{{- $cmName := .name }}
+{{- $patch  := .data }}
+{{- $manifest := .manifest }}
+{{- if and (eq $manifest.spec.kind "ConfigMap") (eq $manifest.spec.metadata.name $cmName) }}
+  {{- if not $manifest.spec.data }}
+    {{- $n := set $manifest.spec "data" dict }}
+  {{- end }}
+  {{- range $k, $v := $patch }}
+    {{- $key := printf "%v" $k }}
+    {{- $n := set $manifest.spec.data $key (printf "%v" $v) }}
+  {{- end }}
+{{- end }}
+{{- end }}
+
 
 {{- define "${packageId}.labels" }} 
 {{- if .globals.labels}}

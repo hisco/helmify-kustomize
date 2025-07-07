@@ -21,6 +21,7 @@ program
     // add a list of files to parametrize, example --parametrize devEnv=overlays/dev/.env --parametrize baseEnv=base/.env
     .option('--parametrize <parametrize>', 'List of files to parametrize', collect, [])
     // add overlay filter option, example --overlay-filter staging,prod
+    .option('--parametrize-configmap <parametrizeConfigmap>', 'The configmap to parametrize', collect, [])
     .option('--overlay-filter <overlayFilter>', 'Comma-separated list of overlay names to include (e.g., "overlays/staging,overlays/prod")')
     .action((actionArg, directoryArg ) => {
         directory = directoryArg
@@ -33,7 +34,7 @@ if (action!= 'build') {
 }
 const options = program.opts();
 const parametrize = options.parametrize || [];
-
+const parametrizeConfigmap = options.parametrizeConfigmap || [];
 
 // Get current working directory
 const cwd = process.cwd();
@@ -65,6 +66,7 @@ wrapKustomizeIntoHelm({
     chartVersion: options.chartVersion,
     chartAppVersion: options.chartAppVersion,
     chartDescription: options.chartDescription,
+    parametrizeConfigmap,
     fs: require('fs'),
     execSync: logAndExecSync,
     parametrize,

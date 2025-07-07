@@ -5,7 +5,6 @@ import { fsDefault } from './utils';
 const { execSync } = require('child_process');
 import * as os from 'os';
 
-const tmpFolder = path.join(os.tmpdir());
 describe('wrapKustomizeIntoHelm', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -48,11 +47,11 @@ describe('wrapKustomizeIntoHelm', () => {
     expect(deploymentYaml.spec.template.spec.containers[0].ports[0].containerPort).toBe(80);
   });
 
-  it('should create helm chart with parametrizing', async () => {
+  it('should create helm chart with dynamic configmap parametrization', async () => {
     const options = {
       cwd: './kustomize-tests',
-      targetFolder: '../test-results/replacements-vars',
-      directory: './replacements-vars',
+      targetFolder: '../test-results/dynamic-configmap',
+      directory: './dynamic-configmap',
       kustomizeOptions: {},
       chartName: 'test-chart',
       chartVersion: '1.0.0',
@@ -60,26 +59,27 @@ describe('wrapKustomizeIntoHelm', () => {
       chartDescription: 'Test Chart',
       fs: fsDefault,
       execSync: execSync,
-      parametrize: ['devEnv=overlays/dev/.env', 'baseEnv=base/.env'],
       overlayFilter: 'overlays/dev,base',
-      tmpFolder:path.resolve(process.cwd(),  'test-results/replacements-vars'),
+      parametrizeConfigmap: ['env=base-environment-values'],
+      tmpFolder:path.resolve(process.cwd(),  'test-results/dynamic-configmap'),
     };
     await wrapKustomizeIntoHelm(options);
     const folder = path.resolve(options.cwd, options.targetFolder);
-    const result = execSync(`helm template test-chart . --set overlay="overlays/dev"` , {
+    const result = execSync(`helm template test-chart . --set overlay="overlays/dev" --set env.TEST=2 --set env.NEW_TEST=1` , {
       cwd: folder,
     });
     const yamls = result.toString().split(/---\n#.+\n/g).filter((s: string) => s.trim() !== '');
-    expect(yamls.length).toBe(4);
+    expect(yamls.length).toBe(3);
 
     const objects = yamls.map((yaml: string) => parseYaml(yaml));
 
     const baseValuesFile = objects.find((o: any) => o.kind === 'ConfigMap' && o.metadata.name.includes('base-environment-values'));
+    // proves that the configmap literals are not overwritten by the values.yaml
     expect(baseValuesFile.data.IMAGE_URL).toBe('nginx:1.14.2');
-    expect(baseValuesFile.data.TEST).toBe("");
-
-    const devEnvFile = objects.find((o: any) => o.kind === 'ConfigMap' && o.metadata.name.includes('dev-environment-values'));
-    expect(devEnvFile.data.APP_NAME).toBe('my-app');
+    // proves that addtional keys are added to the configmap
+    expect(baseValuesFile.data.NEW_TEST).toBe("1");
+    // proves that the configmap literals are overwritten by the values.yaml
+    expect(baseValuesFile.data.TEST).toBe("2");
 
   });
 });
