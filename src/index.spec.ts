@@ -3,12 +3,12 @@ import { parse as parseYaml } from 'yaml';
 import { wrapKustomizeIntoHelm } from './index';
 import { fsDefault } from './utils';
 const { execSync } = require('child_process');
-import * as os from 'os';
 
 describe('wrapKustomizeIntoHelm', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
+
 
   it('should create helm chart with basic configuration', async () => {
     const options = {
@@ -27,7 +27,8 @@ describe('wrapKustomizeIntoHelm', () => {
 
 
     await wrapKustomizeIntoHelm(options);
-    const result = execSync(`helm template test-chart . --set overlay="overlays/dev"` , {
+
+    const result = execSync(`helm template test-chart . --set overlay="overlays/dev" --set globals.images[0].image="*" --set-string globals.images[0].newTag="1.14.3" --set globals.images[0].newName="nginx-test"` , {
       cwd: path.join(options.cwd, options.targetFolder),
     });
     const yamls = result.toString().split(/---\n#.+\n/g).filter((s: string) => s.trim() !== '');
@@ -43,7 +44,7 @@ describe('wrapKustomizeIntoHelm', () => {
     expect(deploymentYaml.metadata.name).toBe('nginx-deployment');
     expect(deploymentYaml.spec.replicas).toBe(3);
     expect(deploymentYaml.spec.selector.matchLabels.app).toBe('nginx');
-    expect(deploymentYaml.spec.template.spec.containers[0].image).toBe('nginx:1.14.2');
+    expect(deploymentYaml.spec.template.spec.containers[0].image).toBe('nginx-test:1.14.3');
     expect(deploymentYaml.spec.template.spec.containers[0].ports[0].containerPort).toBe(80);
   });
 
@@ -62,6 +63,7 @@ describe('wrapKustomizeIntoHelm', () => {
       overlayFilter: 'overlays/dev,base',
       parametrizeConfigmap: ['env=base-environment-values'],
       tmpFolder:path.resolve(process.cwd(),  'test-results/dynamic-configmap'),
+      includeKustomizeFiles: true,
     };
     await wrapKustomizeIntoHelm(options);
     const folder = path.resolve(options.cwd, options.targetFolder);

@@ -1,0 +1,1470 @@
+// import * as path from 'path';
+// import { parse as parseYaml } from 'yaml';
+// import { wrapKustomizeIntoHelm } from './index';
+// import { fsDefault } from './utils';
+// const { execSync } = require('child_process');
+// import * as os from 'os';
+
+// const helmChartRaw = `{{- define "chartUtils.applyPatches" -}}
+// {{- $object := .object -}}
+// {{- $patches := .patches -}}
+// {{- range $patches -}}
+//   {{- if eq .op "add" -}}
+//     {{- $path := .path -}}
+//     {{- $value := .value -}}
+//     {{- $pathSegments := splitList "/" (trimPrefix "/" $path) -}}
+//     {{- $current := $object -}}
+//     {{- $lastIndex := sub (len $pathSegments) 1 -}}
+//     {{- $lastSegment := index $pathSegments $lastIndex -}}
+    
+//     {{- /* Navigate to the parent of the target location */ -}}
+//     {{- $stopIndex := $lastIndex -}}
+//     {{- if eq $lastSegment "-" -}}
+//       {{- $stopIndex = sub $lastIndex 1 -}}
+//     {{- end -}}
+//     {{- range $i, $segment := $pathSegments -}}
+//       {{- if lt $i $stopIndex -}}
+//         {{- /* Check if segment is numeric for array indexing */ -}}
+//         {{- if regexMatch "^[0-9]+$" $segment -}}
+//           {{- $current = index $current (int $segment) -}}
+//         {{- else -}}
+//           {{- $current = index $current $segment -}}
+//         {{- end -}}
+//       {{- end -}}
+//     {{- end -}}
+    
+//     {{- if eq $lastSegment "-" -}}
+//       {{- /* Append to array */ -}}
+//       {{- $parentSegment := index $pathSegments (sub $lastIndex 1) -}}
+//       {{- $existingArray := index $current $parentSegment -}}
+//       {{- if $existingArray -}}
+//         {{- $_ := set $current $parentSegment (append $existingArray $value) -}}
+//       {{- else -}}
+//         {{- $_ := set $current $parentSegment (list $value) -}}
+//       {{- end -}}
+//     {{- else if regexMatch "^[0-9]+$" $lastSegment -}}
+//       {{- /* Array index */ -}}
+//       {{- if $current -}}
+//         {{- $_ := set $current (int $lastSegment) $value -}}
+//       {{- end -}}
+//     {{- else -}}
+//       {{- /* Object property */ -}}
+//       {{- if $current -}}
+//         {{- $_ := set $current $lastSegment $value -}}
+//       {{- end -}}
+//     {{- end -}}
+//   {{- else if eq .op "remove" -}}
+//     {{- $path := .path -}}
+//     {{- $pathSegments := splitList "/" (trimPrefix "/" $path) -}}
+//     {{- $current := $object -}}
+//     {{- $lastIndex := sub (len $pathSegments) 1 -}}
+//     {{- $lastSegment := index $pathSegments $lastIndex -}}
+    
+//     {{- /* Determine navigation depth based on operation type */ -}}
+//     {{- $stopIndex := $lastIndex -}}
+//     {{- if regexMatch "^[0-9]+$" $lastSegment -}}
+//       {{- /* For array element removal, stop at parent of array */ -}}
+//       {{- $stopIndex = sub $lastIndex 1 -}}
+//     {{- end -}}
+    
+//     {{- /* Navigate to the appropriate level */ -}}
+//     {{- range $i, $segment := $pathSegments -}}
+//       {{- if lt $i $stopIndex -}}
+//         {{- /* Check if segment is numeric for array indexing */ -}}
+//         {{- if regexMatch "^[0-9]+$" $segment -}}
+//           {{- $current = index $current (int $segment) -}}
+//         {{- else -}}
+//           {{- $current = index $current $segment -}}
+//         {{- end -}}
+//       {{- end -}}
+//     {{- end -}}
+    
+//     {{- if $current -}}
+//       {{- if regexMatch "^[0-9]+$" $lastSegment -}}
+//         {{- /* Remove array element by index */ -}}
+//         {{- if gt $lastIndex 0 -}}
+//           {{- $parentSegment := index $pathSegments (sub $lastIndex 1) -}}
+//           {{- $existingArray := index $current $parentSegment -}}
+//           {{- if $existingArray -}}
+//             {{- $removeIndex := int $lastSegment -}}
+//             {{- $newArray := list -}}
+//             {{- range $i, $item := $existingArray -}}
+//               {{- if ne $i $removeIndex -}}
+//                 {{- $newArray = append $newArray $item -}}
+//               {{- end -}}
+//             {{- end -}}
+//             {{- $_ := set $current $parentSegment $newArray -}}
+//           {{- end -}}
+//         {{- end -}}
+//       {{- else -}}
+//         {{- /* Remove object property */ -}}
+//         {{- $_ := unset $current $lastSegment -}}
+//       {{- end -}}
+//     {{- end -}}
+//   {{- end -}}
+// {{- end -}}
+// {{- end -}}
+
+// {{- define "chartUtils.applyTargetedPatches" -}}
+// {{- $resources := .resources -}}
+// {{- $patches := .patches -}}
+// {{- range $patches -}}
+//   {{- $target := .target -}}
+//   {{- $ops := .ops -}}
+//   {{- range $resources -}}
+//     {{- $resource := . -}}
+//     {{- /* Check if this resource matches the target */ -}}
+//     {{- $apiVersion := $resource.apiVersion -}}
+//     {{- $kind := $resource.kind -}}
+//     {{- $name := $resource.metadata.name -}}
+//     {{- /* Split apiVersion into group and version */ -}}
+//     {{- $group := "" -}}
+//     {{- $version := $apiVersion -}}
+//     {{- if contains "/" $apiVersion -}}
+//       {{- $parts := splitList "/" $apiVersion -}}
+//       {{- $group = index $parts 0 -}}
+//       {{- $version = index $parts 1 -}}
+//     {{- end -}}
+    
+//     {{- /* Check if target matches */ -}}
+//     {{- if and (eq $group $target.group) (eq $version $target.version) (eq $kind $target.kind) (eq $name $target.name) -}}
+//       {{- /* Apply operations to this resource */ -}}
+//       {{- include "chartUtils.applyPatches" (dict "object" $resource "patches" $ops) -}}
+//     {{- end -}}
+//   {{- end -}}
+// {{- end -}}
+// {{- end -}}
+
+// `
+
+// function printOutput(template:string){
+//   return `
+//   ${template}
+//   {{- include "chartUtils.applyPatches" (dict "object" .Values.k8sDeployment "patches" .Values.patchs) -}}
+// {{- toYaml .Values.k8sDeployment -}}
+//   `
+// }
+// function printOutput2(template:string){
+//   return `
+//   ${template}
+//   {{- include "chartUtils.applyTargetedPatches" (dict "resources" .Values.k8sResources "patches" .Values.patchs) -}}
+// {{- range $index, $resource := .Values.k8sResources -}}
+// {{- if $index }}
+// ---
+// {{- end }}
+// {{- toYaml $resource }}
+// {{- end -}}
+//   `
+// }
+
+
+// describe('playground', () => {
+//   beforeEach(() => {
+//     jest.clearAllMocks();
+//   });
+
+
+//   it('should apply patches to k8sDeployment', async () => {
+   
+//     const result = testHelm({
+//       valuesYaml: `
+// k8sDeployment:
+//   apiVersion: apps/v1
+//   kind: Deployment
+//   metadata:
+//     name: nginx-deployment
+//     labels:
+//       app: nginx
+//   spec:
+//     replicas: 3
+//     selector:
+//       matchLabels:
+//         app: nginx
+//     template:
+//       metadata:
+//         labels:
+//           app: nginx
+//       spec:
+//         containers:
+//         - name: nginx
+//           image: nginx:1.14.2
+          
+// patchs:
+// - op: add
+//   path: /spec/template/spec/containers/0/env/-
+//   value:
+//     name: LOG_LEVEL
+//     value: debug
+//     `,
+//       template: printOutput(helmChartRaw),
+//     });
+    
+//     // Parse the YAML output to get the actual object
+//     const lines = result.split('\n');
+//     const yamlStart = lines.findIndex(line => line.includes('apiVersion: apps/v1'));
+//     const yamlContent = lines.slice(yamlStart).join('\n');
+//     const actualObject = parseYaml(yamlContent);
+    
+//     // Expected object after applying the patch
+//     const expectedObject = {
+//       apiVersion: 'apps/v1',
+//       kind: 'Deployment',
+//       metadata: {
+//         name: 'nginx-deployment',
+//         labels: {
+//           app: 'nginx'
+//         }
+//       },
+//       spec: {
+//         replicas: 3,
+//         selector: {
+//           matchLabels: {
+//             app: 'nginx'
+//           }
+//         },
+//         template: {
+//           metadata: {
+//             labels: {
+//               app: 'nginx'
+//             }
+//           },
+//           spec: {
+//             containers: [
+//               {
+//                 name: 'nginx',
+//                 image: 'nginx:1.14.2',
+//                 env: [
+//                   {
+//                     name: 'LOG_LEVEL',
+//                     value: 'debug'
+//                   }
+//                 ]
+//               }
+//             ]
+//           }
+//         }
+//       }
+//     };
+    
+//     expect(actualObject).toEqual(expectedObject);
+
+//   });
+
+//   it('should apply multiple patches to k8sDeployment', async () => {
+   
+//     const result = testHelm({
+//       valuesYaml: `
+// k8sDeployment:
+//   apiVersion: apps/v1
+//   kind: Deployment
+//   metadata:
+//     name: nginx-deployment
+//     labels:
+//       app: nginx
+//   spec:
+//     replicas: 3
+//     selector:
+//       matchLabels:
+//         app: nginx
+//     template:
+//       metadata:
+//         labels:
+//           app: nginx
+//       spec:
+//         containers:
+//         - name: nginx
+//           image: nginx:1.14.2
+          
+// patchs:
+// - op: add
+//   path: /spec/template/spec/containers/0/env/-
+//   value:
+//     name: LOG_LEVEL
+//     value: debug
+// - op: add
+//   path: /spec/template/spec/containers/0/env/-
+//   value:
+//     name: NODE_ENV
+//     value: production
+// - op: add
+//   path: /spec/template/spec/containers/0/resources
+//   value:
+//     requests:
+//       memory: "64Mi"
+//       cpu: "250m"
+//     limits:
+//       memory: "128Mi"
+//       cpu: "500m"
+// - op: add
+//   path: /spec/replicas
+//   value: 5
+//     `,
+//       template: printOutput(helmChartRaw),
+//     });
+    
+//     // Parse the YAML output to get the actual object
+//     const lines = result.split('\n');
+//     const yamlStart = lines.findIndex(line => line.includes('apiVersion: apps/v1'));
+//     const yamlContent = lines.slice(yamlStart).join('\n');
+//     const actualObject = parseYaml(yamlContent);
+    
+//     // Expected object after applying all patches
+//     const expectedObject = {
+//       apiVersion: 'apps/v1',
+//       kind: 'Deployment',
+//       metadata: {
+//         name: 'nginx-deployment',
+//         labels: {
+//           app: 'nginx'
+//         }
+//       },
+//       spec: {
+//         replicas: 5, // Updated by patch
+//         selector: {
+//           matchLabels: {
+//             app: 'nginx'
+//           }
+//         },
+//         template: {
+//           metadata: {
+//             labels: {
+//               app: 'nginx'
+//             }
+//           },
+//           spec: {
+//             containers: [
+//               {
+//                 name: 'nginx',
+//                 image: 'nginx:1.14.2',
+//                 env: [
+//                   {
+//                     name: 'LOG_LEVEL',
+//                     value: 'debug'
+//                   },
+//                   {
+//                     name: 'NODE_ENV',
+//                     value: 'production'
+//                   }
+//                 ],
+//                 resources: {
+//                   requests: {
+//                     memory: '64Mi',
+//                     cpu: '250m'
+//                   },
+//                   limits: {
+//                     memory: '128Mi',
+//                     cpu: '500m'
+//                   }
+//                 }
+//               }
+//             ]
+//           }
+//         }
+//       }
+//     };
+    
+//     expect(actualObject).toEqual(expectedObject);
+
+//   });
+
+//   it('should apply targeted patches to specific resources', async () => {
+   
+//     const result = testHelm({
+//       valuesYaml: `
+// k8sResources:
+// - apiVersion: apps/v1
+//   kind: Deployment
+//   metadata:
+//     name: my-nginx
+//     labels:
+//       app: nginx
+//   spec:
+//     replicas: 3
+//     selector:
+//       matchLabels:
+//         app: nginx
+//     template:
+//       metadata:
+//         labels:
+//           app: nginx
+//       spec:
+//         containers:
+//         - name: nginx
+//           image: nginx:1.14.2
+          
+// patchs:
+// - target:
+//     group: apps
+//     version: v1
+//     kind: Deployment
+//     name: my-nginx
+//   ops:
+//     - op: add
+//       path: /spec/template/spec/containers/0/env/-
+//       value:
+//         name: LOG_LEVEL
+//         value: debug
+//     - op: add
+//       path: /spec/replicas
+//       value: 5
+//     `,
+//       template: printOutput2(helmChartRaw),
+//     });
+    
+//     // Parse the YAML output to get the actual object
+//     const lines = result.split('\n');
+//     const yamlStart = lines.findIndex(line => line.includes('apiVersion: apps/v1'));
+//     const yamlContent = lines.slice(yamlStart).join('\n');
+//     const actualObject = parseYaml(yamlContent);
+    
+//     // Expected object after applying targeted patches
+//     const expectedObject = {
+//       apiVersion: 'apps/v1',
+//       kind: 'Deployment',
+//       metadata: {
+//         name: 'my-nginx',
+//         labels: {
+//           app: 'nginx'
+//         }
+//       },
+//       spec: {
+//         replicas: 5, // Updated by patch
+//         selector: {
+//           matchLabels: {
+//             app: 'nginx'
+//           }
+//         },
+//         template: {
+//           metadata: {
+//             labels: {
+//               app: 'nginx'
+//             }
+//           },
+//           spec: {
+//             containers: [
+//               {
+//                 name: 'nginx',
+//                 image: 'nginx:1.14.2',
+//                 env: [
+//                   {
+//                     name: 'LOG_LEVEL',
+//                     value: 'debug'
+//                   }
+//                 ]
+//               }
+//             ]
+//           }
+//         }
+//       }
+//     };
+    
+//     expect(actualObject).toEqual(expectedObject);
+
+//   });
+
+//   it('should demonstrate exact user-requested syntax with array of resources', async () => {
+//     const result = testHelm({
+//       valuesYaml: `
+// k8sResources:
+// - apiVersion: apps/v1
+//   kind: Deployment
+//   metadata:
+//     name: my-nginx
+//     labels:
+//       app: nginx
+//   spec:
+//     replicas: 3
+//     selector:
+//       matchLabels:
+//         app: nginx
+//     template:
+//       metadata:
+//         labels:
+//           app: nginx
+//       spec:
+//         containers:
+//         - name: nginx
+//           image: nginx:1.14.2
+// - apiVersion: v1
+//   kind: Service
+//   metadata:
+//     name: my-service
+//     labels:
+//       app: nginx
+//   spec:
+//     selector:
+//       app: nginx
+//     ports:
+//     - port: 80
+//       targetPort: 80
+          
+// patchs:
+// - target:
+//     group: apps
+//     version: v1
+//     kind: Deployment
+//     name: my-nginx
+//   ops:
+//     - op: add
+//       path: /spec/template/spec/containers/0/env/-
+//       value:
+//         name: LOG_LEVEL
+//         value: debug
+//     - op: add
+//       path: /spec/replicas
+//       value: 5
+//     `,
+//       template: printOutput2(helmChartRaw),
+//     });
+    
+//     // Parse the YAML output to get all resources
+//     const documents = result.split('---').filter(doc => doc.trim());
+//     const actualResources = documents.map(doc => parseYaml(doc.trim())).filter(obj => obj);
+    
+//     // Expected: First resource (Deployment) should be patched, second (Service) should be unchanged
+//     expect(actualResources).toHaveLength(2);
+    
+//     // Check that my-nginx Deployment was patched
+//     const deployment = actualResources.find(r => r.kind === 'Deployment' && r.metadata.name === 'my-nginx');
+//     expect(deployment.spec.replicas).toBe(5); // Should be patched
+//     expect(deployment.spec.template.spec.containers[0].env).toEqual([
+//       { name: 'LOG_LEVEL', value: 'debug' }
+//     ]);
+    
+//     // Check that my-service Service was NOT patched (unchanged)
+//     const service = actualResources.find(r => r.kind === 'Service' && r.metadata.name === 'my-service');
+//     expect(service.spec.ports).toEqual([{ port: 80, targetPort: 80 }]); // Should be unchanged
+    
+//   });
+
+//   it('should handle non-matching targets gracefully', async () => {
+//     const result = testHelm({
+//       valuesYaml: `
+// k8sResources:
+// - apiVersion: apps/v1
+//   kind: Deployment
+//   metadata:
+//     name: my-nginx
+//     labels:
+//       app: nginx
+//   spec:
+//     replicas: 3
+//     selector:
+//       matchLabels:
+//         app: nginx
+//     template:
+//       metadata:
+//         labels:
+//           app: nginx
+//       spec:
+//         containers:
+//         - name: nginx
+//           image: nginx:1.14.2
+          
+// patchs:
+// - target:
+//     group: apps
+//     version: v1
+//     kind: Deployment
+//     name: non-existent-deployment
+//   ops:
+//     - op: add
+//       path: /spec/replicas
+//       value: 10
+//     `,
+//       template: printOutput2(helmChartRaw),
+//     });
+    
+//     // Parse the YAML output to get all resources
+//     const documents = result.split('---').filter(doc => doc.trim());
+//     const actualResources = documents.map(doc => parseYaml(doc.trim())).filter(obj => obj);
+    
+//     // Expected: Resource should remain unchanged since target doesn't match
+//     expect(actualResources).toHaveLength(1);
+    
+//     const deployment = actualResources[0];
+//     expect(deployment.spec.replicas).toBe(3); // Should remain unchanged
+//     expect(deployment.spec.template.spec.containers[0].env).toBeUndefined(); // Should remain unchanged
+    
+//   });
+
+//   it('should handle core resources with empty group', async () => {
+//     const result = testHelm({
+//       valuesYaml: `
+// k8sResources:
+// - apiVersion: v1
+//   kind: Service
+//   metadata:
+//     name: my-service
+//     labels:
+//       app: nginx
+//   spec:
+//     selector:
+//       app: nginx
+//     ports:
+//     - port: 80
+//       targetPort: 80
+// - apiVersion: v1
+//   kind: ConfigMap
+//   metadata:
+//     name: my-config
+//   data:
+//     key1: value1
+          
+// patchs:
+// - target:
+//     group: ""
+//     version: v1
+//     kind: Service
+//     name: my-service
+//   ops:
+//     - op: add
+//       path: /spec/ports/0/name
+//       value: http
+// - target:
+//     group: ""
+//     version: v1
+//     kind: ConfigMap
+//     name: my-config
+//   ops:
+//     - op: add
+//       path: /data/key2
+//       value: value2
+//     `,
+//       template: printOutput2(helmChartRaw),
+//     });
+    
+//     // Parse the YAML output to get all resources
+//     const documents = result.split('---').filter(doc => doc.trim());
+//     const actualResources = documents.map(doc => parseYaml(doc.trim())).filter(obj => obj);
+    
+//     expect(actualResources).toHaveLength(2);
+    
+//     // Check that Service was patched
+//     const service = actualResources.find(r => r.kind === 'Service');
+//     expect(service.spec.ports[0].name).toBe('http'); // Should be patched
+//     expect(service.spec.ports[0].port).toBe(80); // Should remain unchanged
+    
+//     // Check that ConfigMap was patched
+//     const configMap = actualResources.find(r => r.kind === 'ConfigMap');
+//     expect(configMap.data.key1).toBe('value1'); // Should remain unchanged
+//     expect(configMap.data.key2).toBe('value2'); // Should be patched
+    
+//   });
+
+//   it('should handle complex nested paths', async () => {
+//     const result = testHelm({
+//       valuesYaml: `
+// k8sResources:
+// - apiVersion: apps/v1
+//   kind: Deployment
+//   metadata:
+//     name: complex-app
+//     labels:
+//       app: complex
+//   spec:
+//     replicas: 2
+//     selector:
+//       matchLabels:
+//         app: complex
+//     template:
+//       metadata:
+//         labels:
+//           app: complex
+//       spec:
+//         containers:
+//         - name: main
+//           image: nginx:1.14.2
+//           resources:
+//             requests:
+//               memory: "64Mi"
+//               cpu: "250m"
+//         - name: sidecar
+//           image: busybox:1.30
+          
+// patchs:
+// - target:
+//     group: apps
+//     version: v1
+//     kind: Deployment
+//     name: complex-app
+//   ops:
+//     - op: add
+//       path: /spec/template/spec/containers/0/resources/limits
+//       value:
+//         memory: "128Mi"
+//         cpu: "500m"
+//     - op: add
+//       path: /spec/template/spec/containers/1/env/-
+//       value:
+//         name: SIDECAR_MODE
+//         value: enabled
+//     - op: add
+//       path: /spec/template/spec/containers/0/ports/-
+//       value:
+//         containerPort: 8080
+//         name: metrics
+//     `,
+//       template: printOutput2(helmChartRaw),
+//     });
+    
+//     // Parse the YAML output to get all resources
+//     const documents = result.split('---').filter(doc => doc.trim());
+//     const actualResources = documents.map(doc => parseYaml(doc.trim())).filter(obj => obj);
+    
+//     expect(actualResources).toHaveLength(1);
+    
+//     const deployment = actualResources[0];
+    
+//     // Check that resource limits were added to first container
+//     expect(deployment.spec.template.spec.containers[0].resources.limits).toEqual({
+//       memory: '128Mi',
+//       cpu: '500m'
+//     });
+    
+//     // Check that original requests are preserved
+//     expect(deployment.spec.template.spec.containers[0].resources.requests).toEqual({
+//       memory: '64Mi',
+//       cpu: '250m'
+//     });
+    
+//     // Check that environment variable was added to sidecar container
+//     expect(deployment.spec.template.spec.containers[1].env).toEqual([
+//       { name: 'SIDECAR_MODE', value: 'enabled' }
+//     ]);
+    
+//     // Check that port was added to main container
+//     expect(deployment.spec.template.spec.containers[0].ports).toEqual([
+//       { containerPort: 8080, name: 'metrics' }
+//     ]);
+    
+//   });
+
+//   it('should handle multiple targets with different resource types', async () => {
+//     const result = testHelm({
+//       valuesYaml: `
+// k8sResources:
+// - apiVersion: apps/v1
+//   kind: Deployment
+//   metadata:
+//     name: web-app
+//     labels:
+//       app: web
+//   spec:
+//     replicas: 3
+//     selector:
+//       matchLabels:
+//         app: web
+//     template:
+//       metadata:
+//         labels:
+//           app: web
+//       spec:
+//         containers:
+//         - name: web
+//           image: nginx:1.14.2
+// - apiVersion: v1
+//   kind: Service
+//   metadata:
+//     name: web-service
+//     labels:
+//       app: web
+//   spec:
+//     selector:
+//       app: web
+//     ports:
+//     - port: 80
+//       targetPort: 80
+// - apiVersion: apps/v1
+//   kind: Deployment
+//   metadata:
+//     name: api-app
+//     labels:
+//       app: api
+//   spec:
+//     replicas: 2
+//     selector:
+//       matchLabels:
+//         app: api
+//     template:
+//       metadata:
+//         labels:
+//           app: api
+//       spec:
+//         containers:
+//         - name: api
+//           image: node:14
+          
+// patchs:
+// - target:
+//     group: apps
+//     version: v1
+//     kind: Deployment
+//     name: web-app
+//   ops:
+//     - op: add
+//       path: /spec/template/spec/containers/0/env/-
+//       value:
+//         name: APP_TYPE
+//         value: web
+// - target:
+//     group: ""
+//     version: v1
+//     kind: Service
+//     name: web-service
+//   ops:
+//     - op: add
+//       path: /spec/type
+//       value: LoadBalancer
+// - target:
+//     group: apps
+//     version: v1
+//     kind: Deployment
+//     name: api-app
+//   ops:
+//     - op: add
+//       path: /spec/template/spec/containers/0/env/-
+//       value:
+//         name: APP_TYPE
+//         value: api
+//     - op: add
+//       path: /spec/replicas
+//       value: 4
+//     `,
+//       template: printOutput2(helmChartRaw),
+//     });
+    
+//     // Parse the YAML output to get all resources
+//     const documents = result.split('---').filter(doc => doc.trim());
+//     const actualResources = documents.map(doc => parseYaml(doc.trim())).filter(obj => obj);
+    
+//     expect(actualResources).toHaveLength(3);
+    
+//     // Check web-app Deployment
+//     const webDeployment = actualResources.find(r => r.kind === 'Deployment' && r.metadata.name === 'web-app');
+//     expect(webDeployment.spec.template.spec.containers[0].env).toEqual([
+//       { name: 'APP_TYPE', value: 'web' }
+//     ]);
+//     expect(webDeployment.spec.replicas).toBe(3); // Should remain unchanged
+    
+//     // Check web-service Service
+//     const webService = actualResources.find(r => r.kind === 'Service' && r.metadata.name === 'web-service');
+//     expect(webService.spec.type).toBe('LoadBalancer'); // Should be patched
+//     expect(webService.spec.ports[0].port).toBe(80); // Should remain unchanged
+    
+//     // Check api-app Deployment
+//     const apiDeployment = actualResources.find(r => r.kind === 'Deployment' && r.metadata.name === 'api-app');
+//     expect(apiDeployment.spec.template.spec.containers[0].env).toEqual([
+//       { name: 'APP_TYPE', value: 'api' }
+//     ]);
+//     expect(apiDeployment.spec.replicas).toBe(4); // Should be patched
+    
+//   });
+
+//   it('should handle appending to existing arrays', async () => {
+//     const result = testHelm({
+//       valuesYaml: `
+// k8sResources:
+// - apiVersion: apps/v1
+//   kind: Deployment
+//   metadata:
+//     name: existing-env-app
+//     labels:
+//       app: existing
+//   spec:
+//     replicas: 2
+//     selector:
+//       matchLabels:
+//         app: existing
+//     template:
+//       metadata:
+//         labels:
+//           app: existing
+//       spec:
+//         containers:
+//         - name: app
+//           image: nginx:1.14.2
+//           env:
+//           - name: EXISTING_VAR
+//             value: existing_value
+//           ports:
+//           - containerPort: 80
+//             name: http
+          
+// patchs:
+// - target:
+//     group: apps
+//     version: v1
+//     kind: Deployment
+//     name: existing-env-app
+//   ops:
+//     - op: add
+//       path: /spec/template/spec/containers/0/env/-
+//       value:
+//         name: NEW_VAR
+//         value: new_value
+//     - op: add
+//       path: /spec/template/spec/containers/0/ports/-
+//       value:
+//         containerPort: 8080
+//         name: metrics
+//     `,
+//       template: printOutput2(helmChartRaw),
+//     });
+    
+//     // Parse the YAML output to get all resources
+//     const documents = result.split('---').filter(doc => doc.trim());
+//     const actualResources = documents.map(doc => parseYaml(doc.trim())).filter(obj => obj);
+    
+//     expect(actualResources).toHaveLength(1);
+    
+//     const deployment = actualResources[0];
+    
+//     // Check that new environment variable was appended to existing ones
+//     expect(deployment.spec.template.spec.containers[0].env).toEqual([
+//       { name: 'EXISTING_VAR', value: 'existing_value' },
+//       { name: 'NEW_VAR', value: 'new_value' }
+//     ]);
+    
+//     // Check that new port was appended to existing ones
+//     expect(deployment.spec.template.spec.containers[0].ports).toEqual([
+//       { containerPort: 80, name: 'http' },
+//       { containerPort: 8080, name: 'metrics' }
+//     ]);
+    
+//   });
+
+//   it('should remove object properties', async () => {
+   
+//     const result = testHelm({
+//       valuesYaml: `
+// k8sDeployment:
+//   apiVersion: apps/v1
+//   kind: Deployment
+//   metadata:
+//     name: nginx-deployment
+//     labels:
+//       app: nginx
+//       version: v1.0
+//       environment: production
+//   spec:
+//     replicas: 3
+//     selector:
+//       matchLabels:
+//         app: nginx
+//     template:
+//       metadata:
+//         labels:
+//           app: nginx
+//       spec:
+//         containers:
+//         - name: nginx
+//           image: nginx:1.14.2
+//           resources:
+//             requests:
+//               memory: "64Mi"
+//               cpu: "250m"
+//             limits:
+//               memory: "128Mi"
+//               cpu: "500m"
+          
+// patchs:
+// - op: remove
+//   path: /metadata/labels/version
+// - op: remove
+//   path: /metadata/labels/environment
+// - op: remove
+//   path: /spec/template/spec/containers/0/resources/limits
+//     `,
+//       template: printOutput(helmChartRaw),
+//     });
+    
+//     // Parse the YAML output to get the actual object
+//     const lines = result.split('\n');
+//     const yamlStart = lines.findIndex(line => line.includes('apiVersion: apps/v1'));
+//     const yamlContent = lines.slice(yamlStart).join('\n');
+//     const actualObject = parseYaml(yamlContent);
+    
+//     // Expected object after removing properties
+//     const expectedObject = {
+//       apiVersion: 'apps/v1',
+//       kind: 'Deployment',
+//       metadata: {
+//         name: 'nginx-deployment',
+//         labels: {
+//           app: 'nginx'
+//           // version and environment should be removed
+//         }
+//       },
+//       spec: {
+//         replicas: 3,
+//         selector: {
+//           matchLabels: {
+//             app: 'nginx'
+//           }
+//         },
+//         template: {
+//           metadata: {
+//             labels: {
+//               app: 'nginx'
+//             }
+//           },
+//           spec: {
+//             containers: [
+//               {
+//                 name: 'nginx',
+//                 image: 'nginx:1.14.2',
+//                 resources: {
+//                   requests: {
+//                     memory: '64Mi',
+//                     cpu: '250m'
+//                   }
+//                   // limits should be removed
+//                 }
+//               }
+//             ]
+//           }
+//         }
+//       }
+//     };
+    
+//     expect(actualObject).toEqual(expectedObject);
+
+//   });
+
+//   it('should remove array elements by index', async () => {
+   
+//     const result = testHelm({
+//       valuesYaml: `
+// k8sDeployment:
+//   apiVersion: apps/v1
+//   kind: Deployment
+//   metadata:
+//     name: nginx-deployment
+//     labels:
+//       app: nginx
+//   spec:
+//     replicas: 3
+//     selector:
+//       matchLabels:
+//         app: nginx
+//     template:
+//       metadata:
+//         labels:
+//           app: nginx
+//       spec:
+//         containers:
+//         - name: nginx
+//           image: nginx:1.14.2
+//           env:
+//           - name: ENV1
+//             value: value1
+//           - name: ENV2
+//             value: value2
+//           - name: ENV3
+//             value: value3
+//           ports:
+//           - containerPort: 80
+//             name: http
+//           - containerPort: 443
+//             name: https
+//           - containerPort: 8080
+//             name: metrics
+          
+// patchs:
+// - op: remove
+//   path: /spec/template/spec/containers/0/env/1
+// - op: remove
+//   path: /spec/template/spec/containers/0/ports/0
+//     `,
+//       template: printOutput(helmChartRaw),
+//     });
+    
+//     // Parse the YAML output to get the actual object
+//     const lines = result.split('\n');
+//     const yamlStart = lines.findIndex(line => line.includes('apiVersion: apps/v1'));
+//     const yamlContent = lines.slice(yamlStart).join('\n');
+//     const actualObject = parseYaml(yamlContent);
+    
+//     // Expected object after removing array elements
+//     const expectedObject = {
+//       apiVersion: 'apps/v1',
+//       kind: 'Deployment',
+//       metadata: {
+//         name: 'nginx-deployment',
+//         labels: {
+//           app: 'nginx'
+//         }
+//       },
+//       spec: {
+//         replicas: 3,
+//         selector: {
+//           matchLabels: {
+//             app: 'nginx'
+//           }
+//         },
+//         template: {
+//           metadata: {
+//             labels: {
+//               app: 'nginx'
+//             }
+//           },
+//           spec: {
+//             containers: [
+//               {
+//                 name: 'nginx',
+//                 image: 'nginx:1.14.2',
+//                 env: [
+//                   { name: 'ENV1', value: 'value1' },
+//                   // ENV2 (index 1) should be removed
+//                   { name: 'ENV3', value: 'value3' }
+//                 ],
+//                 ports: [
+//                   // port 80 (index 0) should be removed
+//                   { containerPort: 443, name: 'https' },
+//                   { containerPort: 8080, name: 'metrics' }
+//                 ]
+//               }
+//             ]
+//           }
+//         }
+//       }
+//     };
+    
+//     expect(actualObject).toEqual(expectedObject);
+
+//   });
+
+//   it('should combine add and remove operations', async () => {
+   
+//     const result = testHelm({
+//       valuesYaml: `
+// k8sDeployment:
+//   apiVersion: apps/v1
+//   kind: Deployment
+//   metadata:
+//     name: nginx-deployment
+//     labels:
+//       app: nginx
+//       version: old
+//       environment: staging
+//   spec:
+//     replicas: 3
+//     selector:
+//       matchLabels:
+//         app: nginx
+//     template:
+//       metadata:
+//         labels:
+//           app: nginx
+//       spec:
+//         containers:
+//         - name: nginx
+//           image: nginx:1.14.2
+//           env:
+//           - name: OLD_VAR
+//             value: old_value
+          
+// patchs:
+// - op: remove
+//   path: /metadata/labels/version
+// - op: remove
+//   path: /metadata/labels/environment
+// - op: add
+//   path: /metadata/labels/version
+//   value: "v2.0"
+// - op: add
+//   path: /metadata/labels/environment
+//   value: production
+// - op: remove
+//   path: /spec/template/spec/containers/0/env/0
+// - op: add
+//   path: /spec/template/spec/containers/0/env/-
+//   value:
+//     name: NEW_VAR
+//     value: new_value
+// - op: add
+//   path: /spec/template/spec/containers/0/env/-
+//   value:
+//     name: ANOTHER_VAR
+//     value: another_value
+//     `,
+//       template: printOutput(helmChartRaw),
+//     });
+    
+//     // Parse the YAML output to get the actual object
+//     const lines = result.split('\n');
+//     const yamlStart = lines.findIndex(line => line.includes('apiVersion: apps/v1'));
+//     const yamlContent = lines.slice(yamlStart).join('\n');
+//     const actualObject = parseYaml(yamlContent);
+    
+//     // Expected object after combined operations
+//     const expectedObject = {
+//       apiVersion: 'apps/v1',
+//       kind: 'Deployment',
+//       metadata: {
+//         name: 'nginx-deployment',
+//         labels: {
+//           app: 'nginx',
+//           version: 'v2.0',  // removed old, added new
+//           environment: 'production'  // removed staging, added production
+//         }
+//       },
+//       spec: {
+//         replicas: 3,
+//         selector: {
+//           matchLabels: {
+//             app: 'nginx'
+//           }
+//         },
+//         template: {
+//           metadata: {
+//             labels: {
+//               app: 'nginx'
+//             }
+//           },
+//           spec: {
+//             containers: [
+//               {
+//                 name: 'nginx',
+//                 image: 'nginx:1.14.2',
+//                 env: [
+//                   // OLD_VAR removed, new vars added
+//                   { name: 'NEW_VAR', value: 'new_value' },
+//                   { name: 'ANOTHER_VAR', value: 'another_value' }
+//                 ]
+//               }
+//             ]
+//           }
+//         }
+//       }
+//     };
+    
+//     expect(actualObject).toEqual(expectedObject);
+
+//   });
+
+//   it('should handle remove operations in targeted patches', async () => {
+   
+//     const result = testHelm({
+//       valuesYaml: `
+// k8sResources:
+// - apiVersion: apps/v1
+//   kind: Deployment
+//   metadata:
+//     name: my-nginx
+//     labels:
+//       app: nginx
+//       version: old
+//       environment: dev
+//   spec:
+//     replicas: 3
+//     selector:
+//       matchLabels:
+//         app: nginx
+//     template:
+//       metadata:
+//         labels:
+//           app: nginx
+//       spec:
+//         containers:
+//         - name: nginx
+//           image: nginx:1.14.2
+//           env:
+//           - name: DEBUG
+//             value: "true"
+//           - name: LOG_LEVEL
+//             value: info
+// - apiVersion: v1
+//   kind: Service
+//   metadata:
+//     name: my-service
+//     labels:
+//       app: nginx
+//       version: old
+//   spec:
+//     selector:
+//       app: nginx
+//     ports:
+//     - port: 80
+//       targetPort: 80
+//     - port: 443
+//       targetPort: 443
+          
+// patchs:
+// - target:
+//     group: apps
+//     version: v1
+//     kind: Deployment
+//     name: my-nginx
+//   ops:
+//     - op: remove
+//       path: /metadata/labels/version
+//     - op: remove
+//       path: /metadata/labels/environment
+//     - op: add
+//       path: /metadata/labels/version
+//       value: "v2.0"
+//     - op: remove
+//       path: /spec/template/spec/containers/0/env/0
+//     - op: add
+//       path: /spec/template/spec/containers/0/env/-
+//       value:
+//         name: PRODUCTION
+//         value: "true"
+// - target:
+//     group: ""
+//     version: v1
+//     kind: Service
+//     name: my-service
+//   ops:
+//     - op: remove
+//       path: /metadata/labels/version
+//     - op: remove
+//       path: /spec/ports/1
+//     `,
+//       template: printOutput2(helmChartRaw),
+//     });
+    
+//     // Parse the YAML output to get all resources
+//     const documents = result.split('---').filter(doc => doc.trim());
+//     const actualResources = documents.map(doc => parseYaml(doc.trim())).filter(obj => obj);
+    
+//     expect(actualResources).toHaveLength(2);
+    
+//     // Check that my-nginx Deployment was patched
+//     const deployment = actualResources.find(r => r.kind === 'Deployment' && r.metadata.name === 'my-nginx');
+//     expect(deployment.metadata.labels.app).toBe('nginx');
+//     expect(deployment.metadata.labels.version).toBe('v2.0'); // replaced
+//     expect(deployment.metadata.labels.environment).toBeUndefined(); // removed
+//     expect(deployment.spec.template.spec.containers[0].env).toEqual([
+//       // DEBUG removed, LOG_LEVEL kept, PRODUCTION added
+//       { name: 'LOG_LEVEL', value: 'info' },
+//       { name: 'PRODUCTION', value: 'true' }
+//     ]);
+    
+//     // Check that my-service Service was patched
+//     const service = actualResources.find(r => r.kind === 'Service' && r.metadata.name === 'my-service');
+//     expect(service.metadata.labels.app).toBe('nginx');
+//     expect(service.metadata.labels.version).toBeUndefined(); // removed
+//     expect(service.spec.ports).toEqual([
+//       // port 443 (index 1) removed, only port 80 remains
+//       { port: 80, targetPort: 80 }
+//     ]);
+    
+//   });
+
+//   it('should gracefully handle removing non-existent properties', async () => {
+   
+//     const result = testHelm({
+//       valuesYaml: `
+// k8sDeployment:
+//   apiVersion: apps/v1
+//   kind: Deployment
+//   metadata:
+//     name: nginx-deployment
+//     labels:
+//       app: nginx
+//   spec:
+//     replicas: 3
+//     selector:
+//       matchLabels:
+//         app: nginx
+//     template:
+//       metadata:
+//         labels:
+//           app: nginx
+//       spec:
+//         containers:
+//         - name: nginx
+//           image: nginx:1.14.2
+          
+// patchs:
+// - op: remove
+//   path: /metadata/labels/nonexistent
+// - op: remove
+//   path: /spec/template/spec/containers/0/env/5
+// - op: remove
+//   path: /spec/template/spec/containers/0/resources
+// - op: add
+//   path: /spec/template/spec/containers/0/env/-
+//   value:
+//     name: NEW_VAR
+//     value: new_value
+//     `,
+//       template: printOutput(helmChartRaw),
+//     });
+    
+//     // Parse the YAML output to get the actual object
+//     const lines = result.split('\n');
+//     const yamlStart = lines.findIndex(line => line.includes('apiVersion: apps/v1'));
+//     const yamlContent = lines.slice(yamlStart).join('\n');
+//     const actualObject = parseYaml(yamlContent);
+    
+//     // Expected object - should be unchanged except for the add operation
+//     const expectedObject = {
+//       apiVersion: 'apps/v1',
+//       kind: 'Deployment',
+//       metadata: {
+//         name: 'nginx-deployment',
+//         labels: {
+//           app: 'nginx'
+//         }
+//       },
+//       spec: {
+//         replicas: 3,
+//         selector: {
+//           matchLabels: {
+//             app: 'nginx'
+//           }
+//         },
+//         template: {
+//           metadata: {
+//             labels: {
+//               app: 'nginx'
+//             }
+//           },
+//           spec: {
+//             containers: [
+//               {
+//                 name: 'nginx',
+//                 image: 'nginx:1.14.2',
+//                 env: [
+//                   { name: 'NEW_VAR', value: 'new_value' }
+//                 ]
+//               }
+//             ]
+//           }
+//         }
+//       }
+//     };
+    
+//     expect(actualObject).toEqual(expectedObject);
+
+//   });
+
+// });
+
+// function testHelm({valuesYaml , template }:{valuesYaml:string, template:string}):string{
+//   // create a random name folder in /tmp
+//   const tmpFolder = path.join(os.tmpdir(), Math.random().toString(36).substring(2, 15));
+//   // create folder
+//   fsDefault.mkdirSync(tmpFolder);
+//   // write file named values.yaml with content:
+//   fsDefault.writeFileSync(path.join(tmpFolder, 'values.yaml'), valuesYaml);
+//   // create templates folder
+//   fsDefault.mkdirSync(path.join(tmpFolder, 'templates'));
+//   // write file named test.yaml with content:
+//   fsDefault.writeFileSync(path.join(tmpFolder, 'templates', 'test.yaml'), template);
+//   // create Chart.yaml with content:
+//   fsDefault.writeFileSync(path.join(tmpFolder, 'Chart.yaml'), `
+//     name: test-chart
+//     version: 1.0.0
+//     appVersion: 1.0.0
+//   `);
+//   // create kustomization.yaml with content:
+//   const result = execSync(`helm template test-chart . --debug` , {
+//     cwd: tmpFolder,
+//   });
+//   return result.toString();
+// }

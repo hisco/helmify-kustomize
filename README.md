@@ -56,7 +56,9 @@ helm push example-service-0.1.0.tgz oci://<registry>/<repository>
 - Enables helm shipping functionality on a kustomize folder.
 - Support helm values with kustomize replacements.
 - Built in helm values to enable advanced functionality (Read more below).
-- **NEW: Overlay filtering** - Process only specific overlays
+- **Overlay filtering** - Process only specific overlays
+- **NEW: Kustomize Files Integration** - Include original kustomization files as Helm template data
+- **NEW: Enhanced ConfigMap Parametrization** - Full runtime configurability of ConfigMap data
 
 ## Installation
 
@@ -87,8 +89,9 @@ npx helmify-kustomize build <context> --target <targetFolder>
 - `-k-[name] *` : any flag will be forwarded to the kustomize build command `-k-something` is converted to `-something`
 - `--k-[name] *` : any flag will be forwarded to the kustomize build command `--k-something` is converted to `--something`
 - `--parametrize <key>=<path>` : This flag is used to parametrize .env files into the helm values.
-- `--parametrize-configmap <key>=<path>` : The falg is used parametrize the configmap in runtime by the key parameter in the .Values, read more about `disableNameSuffixHash`
+- `--parametrize-configmap <key>=<path>` : The flag is used to parametrize the configmap in runtime by the key parameter in the .Values, read more about `disableNameSuffixHash`
 - `--overlay-filter <filter>` : Comma-separated list of overlay names to include
+- `--include-kustomize-files` : Include original kustomization files as template data (default: false)
 
 ### Example
 
@@ -167,6 +170,7 @@ This allows for a lot of flexibility in the helm chart, for example you can set 
 If you think that something is missing and should be added to the built in helm values, please open an issue or a pull request.
 
 - `Values.overlay` : This is the name of the overlay that is been deployed, example `overlays/dev` or `overlays/prod`.
+- `Values.helmifyPrefix` : Customize the location of global helmify configuration. By default, global settings are read from `globals`, but setting this to another value (e.g., `"customGlobals"`) will read from that location instead. 
 - `Values.globals.namespace` : Specify the namespace in all resources.
 - `Values.globals.namePrefix` : Prepends the value to the names of all resources and references.
 - `Values.globals.nameSuffix` : Appends the value to the names of all resources and references.
@@ -189,14 +193,14 @@ globals:
     app: dev
   annotations:
     app: dev
-images:
-  - image: . # this will catch all images in all deployment
-    pullSecrets: # this will add the pull secrets to all pods
-      - name: new-pull-secret
-  - image: old-image # this will catch all images in all deployment with the old-image name
-    newName: new-image
-    newTag: new-tag
-    digest: new-digest
+  images:
+    - image: . # this will catch all images in all deployment
+      pullSecrets: # this will add the pull secrets to all pods
+        - name: new-pull-secret
+    - image: old-image # this will catch all images in all deployment with the old-image name
+      newName: new-image
+      newTag: new-tag
+      digest: new-digest
 manifests:
   - kind: Deployment # this will be added to result and go through the rest of the pipeline manipulations
     name: example-deployment
@@ -217,12 +221,34 @@ resources:
               image: example-image
 ```
 
+### Example using custom helmifyPrefix location
+```yaml
+overlay: overlays/prod
+helmifyPrefix: "customGlobals"  # use customGlobals instead of globals
+customGlobals:  # all global settings now go here instead of globals
+  namespace: production
+  namePrefix: prod-
+  labels:
+    environment: production
+    team: platform
+  images:
+    - image: old-image
+      newName: prod-image
+      newTag: v2.0.0
+```
+
 ### Example of how to set these values with the helm set command
 
 Here demonstrated only a few of the possible values, but you can set any of the values in the `values.yaml` file.
 
 ```sh
 helm upgrade --install example-service ./helm-chart --set globals.namespace=new-namespace --set globals.namePrefix=new-name-prefix
+```
+
+When using custom helmifyPrefix, adjust the paths accordingly:
+
+```sh
+helm upgrade --install example-service ./helm-chart --set helmifyPrefix=customGlobals --set customGlobals.namespace=new-namespace --set customGlobals.namePrefix=new-name-prefix
 ```
 
 ## Kustomize replacements with helm values
@@ -336,9 +362,9 @@ kind: ConfigMap
 metadata:
   name: app-config
 data:
-  APP_NAME: {{ .Values.appConfig.APP_NAME }}
-  APP_VERSION: {{ .Values.appConfig.APP_VERSION }}
-  DEBUG_MODE: {{ .Values.appConfig.DEBUG_MODE }}
+  APP_NAME: my-app-example
+  APP_VERSION: 2.0.0
+  DEBUG_MODE: true
 ```
 
 **Required:** You must provide the values in your `values.yaml`:
@@ -348,6 +374,8 @@ appConfig:
   APP_VERSION: 1.0.0
   DEBUG_MODE: false
 ```
+
+**Important:** Any key/value pair you add to the `appConfig` object will automatically become a key/value pair in the ConfigMap data. This means you can dynamically add new configuration keys without modifying the Helm template.
 
 ### Deployment-Time Configuration
 
@@ -370,6 +398,53 @@ appConfig:
   APP_NAME: production-app
   APP_VERSION: 2.0.0
   DEBUG_MODE: true
+  # New keys automatically added to ConfigMap
+  DATABASE_URL: postgres://prod-db:5432/myapp
+  REDIS_URL: redis://prod-redis:6379
+  FEATURE_FLAG_X: enabled
+```
+
+### Dynamic ConfigMap Example
+
+Here's what happens when you add new properties and change existing ones:
+
+**Original ConfigMap (from Kustomize):**
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: database-config
+data:
+  DB_HOST: localhost
+  DB_PORT: "5432"
+  DB_NAME: myapp
+```
+
+**After parametrization with additional values:**
+```yaml
+# values.yaml
+dbConfig:
+  DB_HOST: localhost          # original value
+  DB_PORT: "5432"            # original value  
+  DB_NAME: production-db     # changed value
+  DB_SSL_MODE: require       # new value
+  DB_POOL_SIZE: "20"         # new value
+  BACKUP_ENABLED: "true"     # new value
+```
+
+**Resulting deployed ConfigMap:**
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: database-config
+data:
+  DB_HOST: localhost
+  DB_PORT: "5432"
+  DB_NAME: production-db     # ← changed
+  DB_SSL_MODE: require       # ← new
+  DB_POOL_SIZE: "20"         # ← new  
+  BACKUP_ENABLED: "true"     # ← new
 ```
 
 ### disableNameSuffixHash
@@ -394,7 +469,8 @@ This ensures that the ConfigMap name remains `app-config` instead of `app-config
 1. **Use descriptive keys** for the parametrization (e.g., `appConfig`, `dbConfig`) to make values.yaml clear
 2. **Always set disableNameSuffixHash: true** for ConfigMaps you want to parametrize
 3. **Provide complete values** in your values.yaml since the ConfigMap data becomes fully dependent on Helm values
-
+4. **Take advantage of dynamic properties** - You can add new configuration keys at deployment time without modifying the Helm template
+5. **Use environment-specific values files** to maintain different configurations for different environments while using the same template
 
 ## Contributing
 
@@ -440,6 +516,19 @@ helmify-kustomize \
   --parametrize devEnv=overlays/dev/.env
 ```
 
+### Example 4: With ConfigMap Parametrization
+
+```bash
+helmify-kustomize \
+  --directory ./my-kustomize \
+  --target-folder ./my-helm-chart \
+  --chart-name my-app \
+  --chart-version 1.0.0 \
+  --parametrize-configmap appConfig=app-config-cm \
+  --parametrize-configmap dbConfig=database-config-cm
+```
+
+
 ### Practical Example
 
 Given a Kustomize directory structure:
@@ -475,22 +564,24 @@ helmify-kustomize \
   --overlay-filter staging,prod
 ```
 
-**Process only the dev overlay:**
+**Process only the dev overlay with kustomize files:**
 ```bash
 helmify-kustomize \
   --directory ./my-kustomize \
   --target-folder ./my-helm-chart \
   --chart-name my-app \
   --chart-version 1.0.0 \
-  --overlay-filter dev
+  --overlay-filter dev \
+  --include-kustomize-files
 ```
 
-**Process all overlays (default behavior):**
+**Process all overlays with ConfigMap parametrization:**
 ```bash
 helmify-kustomize \
   --directory ./my-kustomize \
   --target-folder ./my-helm-chart \
   --chart-name my-app \
-  --chart-version 1.0.0
+  --chart-version 1.0.0 \
+  --parametrize-configmap appConfig=app-config-cm
   # No --overlay-filter specified, processes all overlays
 ```

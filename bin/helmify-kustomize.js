@@ -23,6 +23,7 @@ program
     // add overlay filter option, example --overlay-filter staging,prod
     .option('--parametrize-configmap <parametrizeConfigmap>', 'The configmap to parametrize', collect, [])
     .option('--overlay-filter <overlayFilter>', 'Comma-separated list of overlay names to include (e.g., "overlays/staging,overlays/prod")')
+    .option('--include-kustomize-files', 'Include kustomize files template', false)
     .action((actionArg, directoryArg ) => {
         directory = directoryArg
         action = actionArg
@@ -72,7 +73,8 @@ wrapKustomizeIntoHelm({
     parametrize,
     overlayFilter: options.overlayFilter,
     clearTargetFolder: options.clear,
-    tmpFolder: os.tmpdir()
+    tmpFolder: os.tmpdir(),
+    includeKustomizeFiles: options.includeKustomizeFiles
 });
 
 
