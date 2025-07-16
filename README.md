@@ -177,6 +177,7 @@ If you think that something is missing and should be added to the built in helm 
 - `Values.globals.nameReleasePrefix` : Prepends the value to the name of the release.
 - `Values.globals.labels` : Specify the labels in all resources.
 - `Values.globals.annotations` : Specify the annotations in all resources.
+- `Values.globals.patches` : Apply targeted patches to specific resources. Allows fine-grained modification of Kubernetes resources based on flexible target selectors.
 - `Values.images` : Specify the images to be updated in the helm chart, simillar to kustomize images section, see example below.
 - `Values.manifests` : Specify the manifests to be added to your deployment, these manifests will go through the rest of the pipeline, i.e. they will be affected by the `globals` and `images` sections.
 - `Values.resources` : Specify the resources to be added to your deployment, these resources will be added as is to the deployment they will not go through the rest of the pipeline.
@@ -193,6 +194,22 @@ globals:
     app: dev
   annotations:
     app: dev
+  patches:
+    - target:
+        kind: Deployment
+        name: web-app
+      ops:
+        - op: add
+          path: /spec/template/spec/containers/0/env/-
+          value:
+            name: LOG_LEVEL
+            value: debug
+    - target:
+        labelSelector: "app=web"
+      ops:
+        - op: add
+          path: /metadata/labels/environment
+          value: development
   images:
     - image: . # this will catch all images in all deployment
       pullSecrets: # this will add the pull secrets to all pods
@@ -231,6 +248,16 @@ customGlobals:  # all global settings now go here instead of globals
   labels:
     environment: production
     team: platform
+  patches:
+    - target:
+        group: apps
+        version: v1
+        kind: Deployment
+        namespace: production
+      ops:
+        - op: add
+          path: /metadata/labels/release-channel
+          value: stable
   images:
     - image: old-image
       newName: prod-image
@@ -249,6 +276,236 @@ When using custom helmifyPrefix, adjust the paths accordingly:
 
 ```sh
 helm upgrade --install example-service ./helm-chart --set helmifyPrefix=customGlobals --set customGlobals.namespace=new-namespace --set customGlobals.namePrefix=new-name-prefix
+```
+
+## Targeted Resource Patching
+
+The `globals.patches` feature allows you to apply targeted modifications to specific Kubernetes resources in your Helm chart. This provides fine-grained control over resource configuration without modifying the underlying Kustomize files.
+
+> **Implementation Status**: ✅ **Fully supported** with advanced targeting capabilities including regex patterns, namespace filtering, label/annotation selectors, and wildcard behavior. See table below for specific limitations.
+
+### Target Filtering
+
+Each patch contains a `target` block that lets you filter which objects the patch will affect by combining any of these fields:
+
+| Field | Matches by … | Accepts |
+|-------|-------------|---------|
+| `group` | API group | e.g. `apps`, `batch`, empty string `""` for core/v1 |
+| `version` | API version | `v1`, `v1beta1`, etc. |
+| `kind` | Resource kind | `Deployment`, `ConfigMap`, etc.<br/>Regex allowed: `.*Set$` |
+| `name` | Object name | Exact name or Go-regex: `^web-.*` |
+| `namespace` | Namespace | `prod`, `staging`, etc. |
+| `labelSelector`* | Kubernetes label selector | `app=web,tier=frontend` (simple selectors) |
+| `annotationSelector` | Annotation selector | **Not yet implemented** (planned) |
+
+**Important:** 
+- All supplied conditions are AND-ed together
+- Anything you leave out acts like a wildcard ("match all")
+- (*) Complex label selectors with `in` operators (e.g., `tier in (frontend,backend)`) have parsing limitations
+
+### Patch Operations
+
+Each patch supports standard JSON Patch operations:
+- `add` - Add new values or append to arrays
+- `remove` - Remove properties or array elements  
+- `replace` - Replace existing values
+
+### Examples
+
+#### Basic Resource Targeting
+```yaml
+globals:
+  patches:
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: web-app
+    ops:
+    - op: add
+      path: /spec/template/spec/containers/0/env/-
+      value:
+        name: LOG_LEVEL
+        value: debug
+```
+
+#### Regex Pattern Matching
+```yaml
+globals:
+  patches:
+  - target:
+      group: apps
+      version: v1
+      kind: ".*Set$"  # Matches DaemonSet, ReplicaSet, etc.
+      name: "^web-.*" # Matches names starting with "web-"
+    ops:
+    - op: add
+      path: /metadata/labels/matched-by-regex
+      value: "true"
+```
+
+#### Label Selector Targeting
+```yaml
+globals:
+  patches:
+  - target:
+      labelSelector: "app=web,tier=frontend"
+    ops:
+    - op: add
+      path: /metadata/labels/web-tier
+      value: "true"
+```
+
+#### Annotation Selector Targeting
+```yaml
+globals:
+  patches:
+  - target:
+      annotationSelector: "service.beta.kubernetes.io/aws-load-balancer-type,environment=production"
+    ops:
+    - op: add
+      path: /metadata/labels/aws-production-lb
+      value: "true"
+```
+
+#### Combined Targeting (AND Logic)
+```yaml
+globals:
+  patches:
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: "^web-.*"
+      namespace: production
+      labelSelector: "app=web,tier=frontend"
+      annotationSelector: "deploy.version=2.0"
+    ops:
+    - op: add
+      path: /metadata/labels/fully-matched
+      value: "true"
+```
+
+#### Wildcard Targeting
+```yaml
+globals:
+  patches:
+  - target:
+      labelSelector: "type=application"  # Only labelSelector specified
+      # group, version, kind omitted = matches ALL resource types
+    ops:
+    - op: add
+      path: /metadata/labels/wildcard-matched
+      value: "true"
+```
+
+#### Advanced Path Operations
+```yaml
+globals:
+  patches:
+  - target:
+      kind: Deployment
+      name: my-app
+    ops:
+    # Add environment variable
+    - op: add
+      path: /spec/template/spec/containers/0/env/-
+      value:
+        name: NEW_VAR
+        value: new_value
+    # Remove a label
+    - op: remove
+      path: /metadata/labels/old-label
+    # Replace replicas
+    - op: replace
+      path: /spec/replicas
+      value: 5
+```
+
+### Using with Helm Commands
+
+You can also set patches via Helm command line using `--set-json`:
+
+```sh
+helm upgrade --install myapp ./chart \
+  --set-json 'globals.patches=[{
+    "target": {
+      "kind": "Deployment",
+      "name": "web-app"
+    },
+    "ops": [{
+      "op": "add",
+      "path": "/metadata/labels/env",
+      "value": "production"
+    }]
+  }]'
+```
+
+Or for multiple patches:
+
+```sh
+helm upgrade --install myapp ./chart \
+  --set-json 'globals.patches=[
+    {
+      "target": {
+        "group": "apps",
+        "version": "v1", 
+        "kind": "Deployment",
+        "labelSelector": "app=web"
+      },
+      "ops": [{
+        "op": "add",
+        "path": "/spec/template/spec/containers/0/env/-",
+        "value": {
+          "name": "LOG_LEVEL",
+          "value": "debug"
+        }
+      }]
+    },
+    {
+      "target": {
+        "kind": "Service"
+      },
+      "ops": [{
+        "op": "add",
+        "path": "/metadata/labels/environment",
+        "value": "production"
+      }]
+    }
+  ]'
+```
+
+#### Advanced Helm Targeting Examples
+
+```sh
+# Regex pattern targeting
+helm upgrade --install myapp ./chart \
+  --set-json 'globals.patches=[{
+    "target": {
+      "kind": ".*Set$",
+      "name": "^web-.*"
+    },
+    "ops": [{"op": "add", "path": "/metadata/labels/matched-by-regex", "value": "true"}]
+  }]'
+
+# Namespace-specific targeting
+helm upgrade --install myapp ./chart \
+  --set-json 'globals.patches=[{
+    "target": {
+      "namespace": "production",
+      "kind": "Deployment"
+    },
+    "ops": [{"op": "add", "path": "/metadata/labels/env", "value": "prod"}]
+  }]'
+
+# Label selector targeting (simple selectors)
+helm upgrade --install myapp ./chart \
+  --set-json 'globals.patches=[{
+    "target": {
+      "labelSelector": "app=web,tier=frontend"
+    },
+    "ops": [{"op": "add", "path": "/metadata/labels/web-tier", "value": "true"}]
+  }]'
 ```
 
 ## Kustomize replacements with helm values

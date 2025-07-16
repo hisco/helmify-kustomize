@@ -532,6 +532,73 @@ patchs:
     
   });
 
+  it('should handle core resources without specifying group and version', async () => {
+    const result = testHelm({
+      valuesYaml: `
+k8sResources:
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: my-service
+    labels:
+      app: nginx
+  spec:
+    selector:
+      app: nginx
+    ports:
+    - port: 80
+      targetPort: 80
+- apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: my-config
+  data:
+    key1: value1
+          
+patchs:
+- target:
+    kind: Service
+    name: my-service
+  ops:
+    - op: add
+      path: /spec/ports/0/name
+      value: http
+    - op: add
+      path: /spec/type
+      value: LoadBalancer
+- target:
+    kind: ConfigMap
+    name: my-config
+  ops:
+    - op: add
+      path: /data/key2
+      value: value2
+    - op: add
+      path: /data/key3
+      value: value3
+    `,
+      template: printOutput2(helmChartRaw),
+    });
+    
+    // Parse the YAML output to get all resources
+    const documents = result.split('---').filter(doc => doc.trim());
+    const actualResources = documents.map(doc => parseYaml(doc.trim())).filter(obj => obj);
+    
+    expect(actualResources).toHaveLength(2);
+    
+    // With enhanced targeting, omitted group and version act as wildcards
+    const service = actualResources.find(r => r.kind === 'Service');
+    expect(service.spec.ports[0].name).toBe('http'); // Should be patched
+    expect(service.spec.ports[0].port).toBe(80); // Should remain unchanged
+    expect(service.spec.type).toBe('LoadBalancer'); // Should be patched
+    
+    const configMap = actualResources.find(r => r.kind === 'ConfigMap');
+    expect(configMap.data.key1).toBe('value1'); // Should remain unchanged
+    expect(configMap.data.key2).toBe('value2'); // Should be patched
+    expect(configMap.data.key3).toBe('value3'); // Should be patched
+    
+  });
+
   it('should handle complex nested paths', async () => {
     const result = testHelm({
       valuesYaml: `
@@ -1489,6 +1556,620 @@ globals:
 
   });
 
+  it('should apply manifest patchers without specifying group and version in target', async () => {
+   
+    const result = testHelm({
+      valuesYaml: `
+k8sManifest:
+  apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: my-config
+    labels:
+      app: myapp
+  data:
+    config.properties: |
+      key1=value1
+      key2=value2
+          
+globals:
+  patches:
+  - target:
+      kind: ConfigMap
+      name: my-config
+    ops:
+    - op: add
+      path: /data/newKey
+      value: newValue
+    - op: add
+      path: /metadata/labels/environment
+      value: production
+    `,
+      template: printOutputWithManifestPatchers(helmChartRaw),
+    });
+    
+    // Parse the YAML output to get the actual object
+    const lines = result.split('\n');
+    const yamlStart = lines.findIndex(line => line.includes('apiVersion: v1'));
+    const yamlContent = lines.slice(yamlStart).join('\n');
+    const actualObject = parseYaml(yamlContent);
+    
+    // With enhanced targeting, omitted group and version act as wildcards
+    const expectedObject = {
+      apiVersion: 'v1',
+      kind: 'ConfigMap',
+      metadata: {
+        name: 'my-config',
+        labels: {
+          app: 'myapp',
+          environment: 'production' // Should be added
+        }
+      },
+      data: {
+        'config.properties': 'key1=value1\nkey2=value2\n    \n',
+        newKey: 'newValue' // Should be added
+      }
+    };
+    
+    expect(actualObject).toEqual(expectedObject);
+
+  });
+
+  it('should support regex matching in kind field', async () => {
+    const result = testHelm({
+      valuesYaml: `
+k8sResources:
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: web-deployment
+    labels:
+      app: web
+  spec:
+    replicas: 3
+    selector:
+      matchLabels:
+        app: web
+    template:
+      metadata:
+        labels:
+          app: web
+      spec:
+        containers:
+        - name: web
+          image: nginx:1.14.2
+- apiVersion: apps/v1
+  kind: DaemonSet
+  metadata:
+    name: log-daemonset
+    labels:
+      app: logging
+  spec:
+    selector:
+      matchLabels:
+        app: logging
+    template:
+      metadata:
+        labels:
+          app: logging
+      spec:
+        containers:
+        - name: logger
+          image: fluentd:latest
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: web-service
+    labels:
+      app: web
+  spec:
+    selector:
+      app: web
+    ports:
+    - port: 80
+          
+patchs:
+- target:
+    group: apps
+    version: v1
+    kind: ".*Set$"  # Should match DaemonSet but not Deployment
+  ops:
+    - op: add
+      path: /metadata/labels/matched-by-regex
+      value: "true"
+    `,
+      template: printOutput2(helmChartRaw),
+    });
+    
+    // Parse the YAML output to get all resources
+    const documents = result.split('---').filter(doc => doc.trim());
+    const actualResources = documents.map(doc => parseYaml(doc.trim())).filter(obj => obj);
+    
+    expect(actualResources).toHaveLength(3);
+    
+    // DaemonSet should be patched (matches .*Set$ regex)
+    const daemonSet = actualResources.find(r => r.kind === 'DaemonSet');
+    expect(daemonSet.metadata.labels['matched-by-regex']).toBe('true');
+    
+    // Deployment should NOT be patched (doesn't match .*Set$ regex)
+    const deployment = actualResources.find(r => r.kind === 'Deployment');
+    expect(deployment.metadata.labels['matched-by-regex']).toBeUndefined(); // Should remain undefined
+    
+    // Service should NOT be patched (wrong group)
+    const service = actualResources.find(r => r.kind === 'Service');
+    expect(service.metadata.labels['matched-by-regex']).toBeUndefined(); // Should remain undefined
+    
+  });
+
+  it('should support regex matching in name field', async () => {
+    const result = testHelm({
+      valuesYaml: `
+k8sResources:
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: web-frontend
+    labels:
+      app: frontend
+  spec:
+    replicas: 3
+    selector:
+      matchLabels:
+        app: frontend
+    template:
+      metadata:
+        labels:
+          app: frontend
+      spec:
+        containers:
+        - name: frontend
+          image: nginx:1.14.2
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: web-backend
+    labels:
+      app: backend
+  spec:
+    replicas: 2
+    selector:
+      matchLabels:
+        app: backend
+    template:
+      metadata:
+        labels:
+          app: backend
+      spec:
+        containers:
+        - name: backend
+          image: node:14
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: api-service
+    labels:
+      app: api
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: api
+    template:
+      metadata:
+        labels:
+          app: api
+      spec:
+        containers:
+        - name: api
+          image: python:3.9
+          
+patchs:
+- target:
+    group: apps
+    version: v1
+    kind: Deployment
+    name: "^web-.*"  # Should match web-frontend and web-backend but not api-service
+  ops:
+    - op: add
+      path: /metadata/labels/web-component
+      value: "true"
+    - op: add
+      path: /metadata/unrelated/web-component
+      value: "true"
+    `,
+      template: printOutput2(helmChartRaw),
+    });
+    
+    // Parse the YAML output to get all resources
+    const documents = result.split('---').filter(doc => doc.trim());
+    const actualResources = documents.map(doc => parseYaml(doc.trim())).filter(obj => obj);
+    
+    expect(actualResources).toHaveLength(3);
+    
+    const webFrontend = actualResources.find(r => r.metadata.name === 'web-frontend');
+    const webBackend = actualResources.find(r => r.metadata.name === 'web-backend');
+    const apiService = actualResources.find(r => r.metadata.name === 'api-service');
+    
+    // Both web- prefixed deployments should be patched
+    expect(webFrontend.metadata.labels['web-component']).toBe('true');
+    expect(webBackend.metadata.labels['web-component']).toBe('true');
+    expect(apiService.metadata.labels['web-component']).toBeUndefined(); // Should remain undefined
+    
+    expect(webFrontend.metadata.unrelated['web-component']).toBe('true');
+  });
+
+  it('should support annotationSelector matching', async () => {
+    const result = testHelm({
+      valuesYaml: `
+k8sResources:
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: web-service
+    labels:
+      app: web
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: nlb
+      environment: production
+  spec:
+    type: LoadBalancer
+    selector:
+      app: web
+    ports:
+    - port: 80
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: api-service
+    labels:
+      app: api
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: alb
+      environment: staging
+  spec:
+    type: LoadBalancer
+    selector:
+      app: api
+    ports:
+    - port: 8080
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: internal-service
+    labels:
+      app: internal
+    annotations:
+      environment: production
+  spec:
+    type: ClusterIP
+    selector:
+      app: internal
+    ports:
+    - port: 9000
+          
+patchs:
+- target:
+    group: ""
+    version: v1
+    kind: Service
+    annotationSelector: "service.beta.kubernetes.io/aws-load-balancer-type,environment=production"
+  ops:
+    - op: add
+      path: /metadata/labels/aws-production-lb
+      value: "true"
+    `,
+      template: printOutput2(helmChartRaw),
+    });
+    
+    // Parse the YAML output to get all resources
+    const documents = result.split('---').filter(doc => doc.trim());
+    const actualResources = documents.map(doc => parseYaml(doc.trim())).filter(obj => obj);
+    
+    expect(actualResources).toHaveLength(3);
+    
+    const webService = actualResources.find(r => r.metadata.name === 'web-service');
+    const apiService = actualResources.find(r => r.metadata.name === 'api-service');
+    const internalService = actualResources.find(r => r.metadata.name === 'internal-service');
+    
+    // Only web-service should be patched (has both required annotations)
+    expect(webService.metadata.labels['aws-production-lb']).toBe('true'); // Has both annotations
+    expect(apiService.metadata.labels['aws-production-lb']).toBeUndefined(); // Wrong environment
+    expect(internalService.metadata.labels['aws-production-lb']).toBeUndefined(); // Missing AWS annotation
+    
+  });
+
+  it('should support namespace filtering', async () => {
+    const result = testHelm({
+      valuesYaml: `
+k8sResources:
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: web-app
+    namespace: production
+    labels:
+      app: web
+  spec:
+    replicas: 3
+    selector:
+      matchLabels:
+        app: web
+    template:
+      metadata:
+        labels:
+          app: web
+      spec:
+        containers:
+        - name: web
+          image: nginx:1.14.2
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: web-app
+    namespace: staging
+    labels:
+      app: web
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: web
+    template:
+      metadata:
+        labels:
+          app: web
+      spec:
+        containers:
+        - name: web
+          image: nginx:1.14.2
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: web-app
+    namespace: development
+    labels:
+      app: web
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: web
+    template:
+      metadata:
+        labels:
+          app: web
+      spec:
+        containers:
+        - name: web
+          image: nginx:1.14.2
+          
+patchs:
+- target:
+    group: apps
+    version: v1
+    kind: Deployment
+    name: web-app
+    namespace: production  # Should only match the production deployment
+  ops:
+    - op: add
+      path: /metadata/labels/environment
+      value: production
+    `,
+      template: printOutput2(helmChartRaw),
+    });
+    
+    // Parse the YAML output to get all resources
+    const documents = result.split('---').filter(doc => doc.trim());
+    const actualResources = documents.map(doc => parseYaml(doc.trim())).filter(obj => obj);
+    
+    expect(actualResources).toHaveLength(3);
+    
+    const prodDeployment = actualResources.find(r => r.metadata.namespace === 'production');
+    const stagingDeployment = actualResources.find(r => r.metadata.namespace === 'staging');
+    const devDeployment = actualResources.find(r => r.metadata.namespace === 'development');
+     
+    // Only production deployment should be patched
+    expect(prodDeployment.metadata.labels.environment).toBe('production'); // Only this one should be patched
+    expect(stagingDeployment.metadata.labels.environment).toBeUndefined();
+    expect(devDeployment.metadata.labels.environment).toBeUndefined();
+    
+  });
+
+  it('should support combined target selectors (AND logic)', async () => {
+    const result = testHelm({
+      valuesYaml: `
+k8sResources:
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: web-frontend
+    namespace: production
+    labels:
+      app: web
+      tier: frontend
+      version: v2
+    annotations:
+      deploy.version: "2.0"
+  spec:
+    replicas: 3
+    selector:
+      matchLabels:
+        app: web
+    template:
+      metadata:
+        labels:
+          app: web
+      spec:
+        containers:
+        - name: frontend
+          image: nginx:1.14.2
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: web-backend
+    namespace: production
+    labels:
+      app: web
+      tier: backend
+      version: v1
+    annotations:
+      deploy.version: "1.0"
+  spec:
+    replicas: 2
+    selector:
+      matchLabels:
+        app: web
+    template:
+      metadata:
+        labels:
+          app: web
+      spec:
+        containers:
+        - name: backend
+          image: node:14
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: web-frontend
+    namespace: staging
+    labels:
+      app: web
+      tier: frontend
+      version: v2
+    annotations:
+      deploy.version: "2.0"
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: web
+    template:
+      metadata:
+        labels:
+          app: web
+      spec:
+        containers:
+        - name: frontend
+          image: nginx:1.14.2
+          
+patchs:
+- target:
+    group: apps
+    version: v1
+    kind: Deployment
+    name: "^web-.*"                          # Must match name pattern
+    namespace: production                    # Must be in production namespace
+    labelSelector: "app=web,tier=frontend"  # Must have specific labels
+    annotationSelector: "deploy.version=2.0" # Must have specific annotation
+  ops:
+    - op: add
+      path: /metadata/labels/fully-matched
+      value: "true"
+    `,
+      template: printOutput2(helmChartRaw),
+    });
+    
+    // Parse the YAML output to get all resources
+    const documents = result.split('---').filter(doc => doc.trim());
+    const actualResources = documents.map(doc => parseYaml(doc.trim())).filter(obj => obj);
+    
+    expect(actualResources).toHaveLength(3);
+    
+    const prodFrontend = actualResources.find(r => 
+      r.metadata.name === 'web-frontend' && r.metadata.namespace === 'production'
+    );
+    const prodBackend = actualResources.find(r => 
+      r.metadata.name === 'web-backend' && r.metadata.namespace === 'production'
+    );
+    const stagingFrontend = actualResources.find(r => 
+      r.metadata.name === 'web-frontend' && r.metadata.namespace === 'staging'
+    );
+    
+    // Only prodFrontend should match ALL conditions
+    expect(prodFrontend.metadata.labels['fully-matched']).toBe('true');
+    expect(prodBackend.metadata.labels['fully-matched']).toBeUndefined(); // tier=backend doesn't match
+    expect(stagingFrontend.metadata.labels['fully-matched']).toBeUndefined(); // namespace=staging doesn't match
+    
+  });
+
+  it('should act as wildcard when target fields are omitted', async () => {
+    const result = testHelm({
+      valuesYaml: `
+k8sResources:
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: app1
+    labels:
+      type: application
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: app1
+    template:
+      metadata:
+        labels:
+          app: app1
+      spec:
+        containers:
+        - name: app
+          image: nginx:1.14.2
+- apiVersion: batch/v1
+  kind: Job
+  metadata:
+    name: job1
+    labels:
+      type: application
+  spec:
+    template:
+      spec:
+        containers:
+        - name: job
+          image: busybox:latest
+        restartPolicy: Never
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: svc1
+    labels:
+      type: application
+  spec:
+    selector:
+      app: app1
+    ports:
+    - port: 80
+          
+patchs:
+- target:
+    labelSelector: "type=application"  # Only labelSelector specified - should match all resources with this label regardless of group/version/kind
+  ops:
+    - op: add
+      path: /metadata/labels/wildcard-matched
+      value: "true"
+    `,
+      template: printOutput2(helmChartRaw),
+    });
+    
+    // Parse the YAML output to get all resources
+    const documents = result.split('---').filter(doc => doc.trim());
+    const actualResources = documents.map(doc => parseYaml(doc.trim())).filter(obj => obj);
+    
+    expect(actualResources).toHaveLength(3);
+    
+    const deployment = actualResources.find(r => r.kind === 'Deployment');
+    const job = actualResources.find(r => r.kind === 'Job');
+    const service = actualResources.find(r => r.kind === 'Service');
+    
+    // All resources should match because only labelSelector is specified and all have type=application
+    expect(deployment.metadata.labels['wildcard-matched']).toBe('true');
+    expect(job.metadata.labels['wildcard-matched']).toBe('true');
+    expect(service.metadata.labels['wildcard-matched']).toBe('true');
+    
+  });
+
+
+
 });
 
 function testHelm({valuesYaml , template }:{valuesYaml:string, template:string}):string{
@@ -1509,7 +2190,7 @@ function testHelm({valuesYaml , template }:{valuesYaml:string, template:string})
     appVersion: 1.0.0
   `);
   // create kustomization.yaml with content:
-  const result = execSync(`helm template test-chart . --debug` , {
+  const result = execSync(`helm template test-chart .` , {
     cwd: tmpFolder,
   });
   return result.toString();
