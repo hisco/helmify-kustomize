@@ -1,6 +1,7 @@
-import { trimIndent } from '../lang';
 import * as fs from 'fs';
 import * as path from 'path';
+import { AnchorInfo } from '../anchor-ref';
+import { generateYamlFromatInfraHelpers, generateValuesYamlTemplate } from './helm-yaml-anchors';
 /**
  * Generates the content of the chart utils file
  * @param {string} packageId - The id of the package that is used to prefix the helpers
@@ -14,6 +15,8 @@ export const chartUtils = (packageId: string): string => {
 
   const patchUtilsTplContent = fs.readFileSync(path.join(__dirname, 'chart-utils', 'patches.tpl'), 'utf8');
   const patchUtilsContent = (patchUtilsTplContent.replace(/chartUtils\./g, packageId + '.'));
-
+  
   return `${utilsContent}\n${patchUtilsContent}`;
 };
+
+

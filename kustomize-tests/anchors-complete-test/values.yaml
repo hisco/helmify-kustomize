@@ -1,0 +1,47 @@
+# Test scenario for complete anchor functionality - using simple patterns
+app_name: &app_name "my-test-app"
+app_replicas: &app_replicas 5
+app_port: &app_port 9090
+
+globals:
+  patches:
+    # Patch deployment name using anchor
+    - target:
+        kind: Deployment
+        name: test-app
+      ops:
+        - op: replace
+          path: /metadata/name
+          value: *app_name
+        - op: replace
+          path: /spec/replicas
+          value: *app_replicas
+        - op: replace
+          path: /spec/template/spec/containers/0/ports/0/containerPort
+          value: *app_port
+    
+    # Patch service using anchors
+    - target:
+        kind: Service
+        name: test-service
+      ops:
+        - op: replace
+          path: /metadata/name
+          value: *app_name
+        - op: replace
+          path: /spec/ports/0/targetPort
+          value: *app_port
+        - op: add
+          path: /spec/ports/0/port
+          value: *app_port
+    
+    # Test additional anchor usage - add annotation with anchor value
+    - target:
+        kind: Service
+        name: test-service
+      ops:
+        - op: add
+          path: /metadata/annotations
+          value:
+            app-name: *app_name
+            app-port: *app_port

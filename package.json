@@ -1,11 +1,11 @@
 {
   "name": "helmify-kustomize",
-  "version": "1.1.2",
+  "version": "1.2.5",
   "description": "",
   "main": "index.js",
   "scripts": {
     "test": "jest",
-    "build": "rm -rf dist && tsc"
+    "build": "rm -rf dist && tsc && cp -r src/templates/chart-utils dist/templates/chart-utils"
   },
   "bin": "./bin/helmify-kustomize.js",
   "keywords": [

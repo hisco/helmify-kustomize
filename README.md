@@ -729,6 +729,144 @@ This ensures that the ConfigMap name remains `app-config` instead of `app-config
 4. **Take advantage of dynamic properties** - You can add new configuration keys at deployment time without modifying the Helm template
 5. **Use environment-specific values files** to maintain different configurations for different environments while using the same template
 
+## Dynamic Anchor Resolution
+
+By default, `helmify-kustomize` automatically enables **Dynamic Anchor Resolution** to solve a fundamental timing issue between YAML anchors and Helm value overrides. This feature can be disabled with the `--disable-dynamic-anchor-replacement` flag.
+
+### The Problem: YAML Anchors vs Helm Overrides
+
+YAML anchors are a powerful DRY (Don't Repeat Yourself) feature, but they have a critical limitation when used with Helm charts: **anchors are resolved during YAML parsing, before Helm can apply any value overrides**. This creates a timing issue where Helm's `--set` commands cannot effectively update anchor values and their references.
+
+#### Example of the Problem
+
+Consider this `values.yaml` with anchors:
+
+```yaml
+# values.yaml
+app_name: &app_name "my-app"
+app_port: &app_port 8080
+
+services:
+  frontend:
+    name: *app_name
+    port: *app_port
+  backend:
+    name: *app_name
+    port: *app_port
+```
+
+**Without Dynamic Anchor Resolution:**
+```bash
+# This WILL NOT work as expected
+helm install myapp ./chart --set app_port=9090
+
+# Result: services.frontend.port and services.backend.port remain 8080
+# Because the anchor was already resolved to 8080 during YAML parsing
+```
+
+The `--set app_port=9090` only updates the anchor definition, but all the references (`*app_port`) were already resolved to `8080` during YAML parsing, before Helm could apply the override.
+
+### The Solution: Dynamic Anchor Resolution
+
+Dynamic Anchor Resolution solves this by using Helm templates to defer anchor resolution until after Helm processes all value overrides. This allows a single `--set` command to update both the anchor value and all its references throughout the chart.
+
+**With Dynamic Anchor Resolution (enabled by default):**
+```bash
+# This WORKS as expected
+helm install myapp ./chart --set app_port=9090
+
+# Result: services.frontend.port and services.backend.port are now 9090
+# The anchor resolution happens AFTER Helm applies the override
+```
+
+### How It Works
+
+The feature works by transforming your `values.yaml` during the build process:
+
+1. **Anchor Detection**: Identifies all YAML anchors (`&anchor_name`) and their references (`*anchor_name`)
+2. **Template Generation**: Creates a Helm template that reconstructs the YAML with dynamic placeholders for anchor values
+3. **Runtime Resolution**: When you deploy the chart, the template resolves anchor values using the final Helm values (after all overrides are applied)
+4. **Natural Reference Resolution**: YAML references (`*anchor_name`) are left untouched, allowing the YAML parser to resolve them naturally after the anchor values are set
+
+### Real-World Example
+
+**Original `values.yaml` with anchors:**
+```yaml
+# Database configuration with anchors
+db_host: &db_host "localhost"
+db_port: &db_port 5432
+db_name: &db_name "myapp"
+
+# Microservices using the same database
+services:
+  user_service:
+    database:
+      host: *db_host
+      port: *db_port
+      name: *db_name
+  
+  order_service:
+    database:
+      host: *db_host
+      port: *db_port
+      name: *db_name
+  
+  inventory_service:
+    database:
+      host: *db_host
+      port: *db_port
+      name: *db_name
+
+# Connection strings also using anchors
+connection_strings:
+  primary: "postgresql://*db_host:*db_port/*db_name"
+  readonly: "postgresql://*db_host:*db_port/*db_name?readonly=true"
+```
+
+**Deployment with overrides:**
+```bash
+# Deploy to production with different database settings
+helm install myapp ./chart \
+  --set db_host=prod-db.example.com \
+  --set db_port=5433 \
+  --set db_name=myapp_prod
+
+# Result: ALL references are updated:
+# - All three services get the production database settings
+# - Connection strings are updated with production values
+# - Everything stays in sync automatically
+```
+
+### Benefits
+
+1. **Single Point of Truth**: Update a value once, and all references update automatically
+2. **Helm Override Compatibility**: Full support for `--set` and `-f values.yaml` overrides
+3. **Type Preservation**: Supports all YAML types (strings, numbers, booleans, objects, arrays)
+3. **Clean Values Files**: Maintain readable values.yaml with meaningful anchors
+
+### Disabling Dynamic Anchor Resolution
+
+If you need to disable this feature (for example, for compatibility testing or if you prefer static anchor resolution), use:
+
+```bash
+helmify-kustomize build ./kustomize-folder \
+  --chart-name my-app \
+  --target ./helm-chart \
+  --disable-dynamic-anchor-replacement
+```
+
+When disabled, YAML anchors will be resolved during the build process, and Helm overrides will not affect anchor references.
+
+### Technical Details
+
+The feature works by:
+1. Generating a `_values.yaml.tpl` template in your Helm chart
+2. Creating safe getter functions for each anchor with default values
+3. Using Helm's `printf` function with `%v` placeholders for type-safe value substitution
+4. Preserving the original YAML structure while making anchor values dynamic
+
+This approach ensures that the final YAML is valid and that all anchor references resolve correctly at runtime.
+
 ## Contributing
 
 Contributions are welcome! Please submit a pull request or open an issue to discuss improvements or bugs.

@@ -1,3 +1,43 @@
+{{- define "chartUtils.getValue" -}}
+{{- $current := .Values -}}
+{{- $found := true -}}
+{{- range $segment := .path -}}
+  {{- if and $found $current -}}
+    {{- if kindIs "map" $current -}}
+      {{- if hasKey $current $segment -}}
+        {{- $current = index $current $segment -}}
+      {{- else -}}
+        {{- $found = false -}}
+      {{- end -}}
+    {{- else if kindIs "slice" $current -}}
+      {{- $index := int $segment -}}
+      {{- if and (ge $index 0) (lt $index (len $current)) -}}
+        {{- $current = index $current $index -}}
+      {{- else -}}
+        {{- $found = false -}}
+      {{- end -}}
+    {{- else -}}
+      {{- $found = false -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- if $found -}}
+  {{- $current -}}
+{{- else -}}
+  {{- .default -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "chartUtils.pickFirstNonEmpty" -}}
+{{- $first := index . 0 -}}
+{{- $second := index . 1 -}}
+{{- if $first }}
+  {{- $first }}
+{{- else }}
+  {{- $second }}
+{{- end }}
+{{- end }}
+
 {{- define "chartUtils.getGlobals" }}
 {{- if .Values.helmifyPrefix }}
   {{- index .Values .Values.helmifyPrefix }}

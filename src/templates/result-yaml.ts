@@ -11,11 +11,15 @@ export interface ParametrizeConfigmap{
  * @returns {string} The content of the result.yaml file
  */
 export const yamlResult = (chartPrefix: string , packageId: string , parametrizeConfigmaps: ParametrizeConfigmap[], includeKustomizeFiles: boolean): string => {
-  return trimIndent(`{{- $all := fromYaml (include "${chartPrefix}.yamls" (dict "Values" .Values) ) }}
-${includeKustomizeFiles ? `{{- $kustomizeFiles := fromYaml (include "${chartPrefix}.kustomizeFiles" (dict "Values" .Values) ) }}` : ''}
+  return trimIndent(`
+{{- $templateValues := fromYaml (include "${packageId}.valuesYaml" (dict "Values" .Values)) }}
+{{- $values := merge $templateValues (pick .Values "overlay") }}
 
-{{- if .Values.manifests }}
-{{- range $key, $manifest := .Values.manifests }}
+{{- $all := fromYaml (include "${chartPrefix}.yamls" (dict "Values" $values) ) }}
+${includeKustomizeFiles ? `{{- $kustomizeFiles := fromYaml (include "${chartPrefix}.kustomizeFiles" (dict "Values" $values) ) }}` : ''}
+
+{{- if $values.manifests }}
+{{- range $key, $manifest := $values.manifests }}
 {{- $result := append $all.manifests (dict "spec" $manifest) }}
 {{- $n := set $all "manifests" $result -}}
 {{- end }}
@@ -23,10 +27,10 @@ ${includeKustomizeFiles ? `{{- $kustomizeFiles := fromYaml (include "${chartPref
 
 {{- range $key, $manifest := $all.manifests }}
 {{- $globals := "" }}
-{{- if $.Values.helmifyPrefix }}
-  {{- $globals = index $.Values $.Values.helmifyPrefix }}
+{{- if $values.helmifyPrefix }}
+  {{- $globals = index $values $values.helmifyPrefix }}
 {{- else }}
-  {{- $globals = $.Values.globals }}
+  {{- $globals = $values.globals }}
 {{- end }}
 {{- include "${packageId}.ensureMetadata" (dict "manifest" $manifest)}}
 {{- include "${packageId}.updataImages" (dict "manifest" $manifest "globals" $globals)}}
@@ -34,7 +38,7 @@ ${includeKustomizeFiles ? `{{- $kustomizeFiles := fromYaml (include "${chartPref
 {{- include "${packageId}.setNamespace" (dict "manifest" $manifest "globals" $globals)}}
 {{- include "${packageId}.setNamePrefix" (dict "manifest" $manifest "globals" $globals)}}
 {{- include "${packageId}.setNameSuffix" (dict "manifest" $manifest "globals" $globals)}}
-{{- include "${packageId}.nameReleasePrefix" (dict "manifest" $manifest "globals" $globals "Values" $.Values)}}
+{{- include "${packageId}.nameReleasePrefix" (dict "manifest" $manifest "globals" $globals "Values" $values)}}
 {{- include "${packageId}.labels" (dict "manifest" $manifest "globals" $globals)}}
 {{- include "${packageId}.annotations" (dict "manifest" $manifest "globals" $globals)}}
 {{- include "${packageId}.applyManifestPatchers" (dict "manifest" $manifest "globals" $globals)}}

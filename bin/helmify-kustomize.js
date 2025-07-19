@@ -24,6 +24,7 @@ program
     .option('--parametrize-configmap <parametrizeConfigmap>', 'The configmap to parametrize', collect, [])
     .option('--overlay-filter <overlayFilter>', 'Comma-separated list of overlay names to include (e.g., "overlays/staging,overlays/prod")')
     .option('--include-kustomize-files', 'Include kustomize files template', false)
+    .option('--disable-dynamic-anchor-replacement', 'Disable dynamic anchor replacement', false)
     .action((actionArg, directoryArg ) => {
         directory = directoryArg
         action = actionArg
@@ -74,7 +75,8 @@ wrapKustomizeIntoHelm({
     overlayFilter: options.overlayFilter,
     clearTargetFolder: options.clear,
     tmpFolder: os.tmpdir(),
-    includeKustomizeFiles: options.includeKustomizeFiles
+    includeKustomizeFiles: options.includeKustomizeFiles,
+    enabledDynamicAnchorReplacement: !options.disableDynamicAnchorReplacement
 });
 
 
