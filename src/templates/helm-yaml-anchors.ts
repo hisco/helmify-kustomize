@@ -93,10 +93,6 @@ import { analyzeYamlAnchors, AnchorInfo } from "../anchor-ref";
   
 //   return template;
 // }
-export function generateYamlFromatInfraHelpers(namespace: string, yamlValuesString: string): string {
-  // No need to generate utility functions anymore - they're in chart utils
-  return '';
-}
 
 // export function getHelperGetAnchorFinalValueName(namespace: string,anchorName: string): string {
 //   return `${namespace}.getAnchorFinalValue.${anchorName}`;
@@ -163,7 +159,7 @@ Notice that references (*app ..) are not replaced! as once the yaml string is pa
 
 
 */
-export function generateValuesYamlTemplate(namespace: string , yamlValuesString: string): string {
+export function generateValuesYamlTemplate(namespace: string , chartUtilsNamespace: string, yamlValuesString: string): string {
     const anchors = analyzeYamlAnchors(yamlValuesString);
     
     if (anchors.length === 0) {
@@ -185,7 +181,7 @@ ${yamlValuesString}
       const varName = `$runtime_${anchor.name}`;
       const pathList = anchor.path.map(p => `"${p}"`).join(' ');
       const defaultValue = anchor.value;
-      templateLines.push(`{{- ${varName} := include "${namespace}.getValue" (dict "Values" .Values "path" (list ${pathList}) "default" "${defaultValue}") -}}`);
+      templateLines.push(`{{- ${varName} := include "${chartUtilsNamespace}.getValue" (dict "Values" .Values "path" (list ${pathList}) "default" "${defaultValue}") -}}`);
     });
     
     // Generate default value declarations for each anchor
@@ -206,7 +202,7 @@ ${yamlValuesString}
           formattedValue = formattedValue.replace(refPattern, '%s');
           const otherRuntimeVar = `$runtime_${refAnchor.name}`;
           const otherDefaultVar = `$anchor_${refAnchor.name}_default`;
-          printfParts.push(`(include "${namespace}.pickFirstNonEmpty" (list ${otherRuntimeVar} ${otherDefaultVar}) | indent 2)`);
+          printfParts.push(`(include "${chartUtilsNamespace}.pickFirstNonEmpty" (list ${otherRuntimeVar} ${otherDefaultVar}) | indent 2)`);
         });
         
         templateLines.push(`{{- ${defaultVarName} := printf \`${escapeBackticks(formattedValue)}\` ${printfParts.join(' ')} -}}`);
@@ -240,7 +236,7 @@ ${yamlValuesString}
     // Build final value variables for each replacement
     replacements.forEach(replacement => {
       const finalVarName = `$final_${replacement.anchor}`;
-      templateLines.push(`{{- ${finalVarName} := include "${namespace}.pickFirstNonEmpty" (list ${replacement.runtime} ${replacement.default}) -}}`);
+      templateLines.push(`{{- ${finalVarName} := include "${chartUtilsNamespace}.pickFirstNonEmpty" (list ${replacement.runtime} ${replacement.default}) -}}`);
     });
     
     // Build printf parameters using the final variables

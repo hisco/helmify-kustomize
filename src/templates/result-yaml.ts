@@ -10,10 +10,13 @@ export interface ParametrizeConfigmap{
  * @param {string} chartPrefix - The prefix of the chart that prefixes the helper name
  * @returns {string} The content of the result.yaml file
  */
-export const yamlResult = (chartPrefix: string , packageId: string , parametrizeConfigmaps: ParametrizeConfigmap[], includeKustomizeFiles: boolean): string => {
+export const yamlResult = (chartPrefix: string , packageId: string , parametrizeConfigmaps: ParametrizeConfigmap[], includeKustomizeFiles: boolean , hasTemplatedValuesYaml: boolean): string => {
   return trimIndent(`
-{{- $templateValues := fromYaml (include "${packageId}.valuesYaml" (dict "Values" .Values)) }}
-{{- $values := merge $templateValues (pick .Values "overlay") }}
+
+${hasTemplatedValuesYaml ? 
+`{{- $templateValues := fromYaml (include "${chartPrefix}.valuesYaml" (dict "Values" .Values)) }}
+{{- $values := merge $templateValues (pick .Values "overlay") }}` 
+: `{{- $values := .Values }}`}
 
 {{- $all := fromYaml (include "${chartPrefix}.yamls" (dict "Values" $values) ) }}
 ${includeKustomizeFiles ? `{{- $kustomizeFiles := fromYaml (include "${chartPrefix}.kustomizeFiles" (dict "Values" $values) ) }}` : ''}
