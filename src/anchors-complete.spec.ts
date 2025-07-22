@@ -221,6 +221,93 @@ globals:
 
   });
 
+  it('should properly replace anchor values in generated k8s objects when using values file', async () => {
+    const options = {
+      cwd,
+      targetFolder,
+      directory,
+      kustomizeOptions: {},
+      chartName: 'anchors-test-chart',
+      chartVersion: '1.0.0',
+      chartAppVersion: '1.0.0',
+      chartDescription: 'Anchors Test Chart',
+      fs: fsDefault,
+      execSync,
+      tmpFolder: path.resolve(process.cwd(), `test-results/${testName}`),
+      replaceAnchorsWithHashes: true, // Enable hash replacement
+    };
+
+    try {
+      await wrapKustomizeIntoHelm(options);
+    } catch (error) {
+      console.error('wrapKustomizeIntoHelm failed:', error);
+      throw error;
+    }
+
+    const cwdHelm = path.join(cwd, targetFolder);
+    
+    // Create values file with runtime overrides
+    const valuesFilePath = path.join(cwdHelm, 'runtime-values.yaml');
+    fs.writeFileSync(valuesFilePath, `overlay: "overlays/dev"
+app_name: "runtime-app"
+app_port: 7777
+app_replicas: 42
+`);
+    
+    const runtimeOverrideResult = execSync(`helm template anchors-test-chart . -f runtime-values.yaml`, {
+      cwd: cwdHelm
+    });
+    
+    console.log('=== HELM TEMPLATE OUTPUT (VALUES FILE) ===');
+    console.log(runtimeOverrideResult.toString());
+    console.log('=== END OUTPUT ===');
+    
+    const runtimeOverrideYamls = runtimeOverrideResult.toString().split(/---\n/g).filter((s: string) => s.trim() !== '');
+    console.log('YAML chunks found:', runtimeOverrideYamls.length);
+    
+    const runtimeOverrideObjects = runtimeOverrideYamls.map((yaml: string) => parseYaml(yaml));
+    console.log('Objects found:', runtimeOverrideObjects.map((obj: any) => obj?.kind || 'Unknown'));
+    
+    const runtimeOverrideDeployment = runtimeOverrideObjects.find((obj: any) => obj.kind === 'Deployment');
+    const runtimeOverrideService = runtimeOverrideObjects.find((obj: any) => obj.kind === 'Service');
+    
+    // Verify objects exist
+    expect(runtimeOverrideDeployment).toBeDefined();
+    expect(runtimeOverrideService).toBeDefined();
+    
+    expect(runtimeOverrideDeployment.spec.replicas).toBe(42);
+    expect(runtimeOverrideDeployment.metadata.name).toBe('runtime-app');
+    expect(runtimeOverrideService.spec.ports[0].port).toBe(7777);
+    
+    // Test with anchor name overrides using second values file
+    const anchorOverrideValuesPath = path.join(cwdHelm, 'anchor-override-values.yaml');
+    fs.writeFileSync(anchorOverrideValuesPath, `overlay: "overlays/dev"
+app_name: "anchor-override-app"
+app_port: 8888
+app_replicas: 45
+`);
+    
+    const anchorOverrideResult = execSync(`helm template anchors-test-chart . -f anchor-override-values.yaml`, {
+      cwd: cwdHelm,
+    });
+    
+    const anchorOverrideYamls = anchorOverrideResult.toString().split(/---\n/g).filter((s: string) => s.trim() !== '');
+    const anchorOverrideObjects = anchorOverrideYamls.map((yaml: string) => parseYaml(yaml));
+    const anchorOverrideDeployment = anchorOverrideObjects.find((obj: any) => obj.kind === 'Deployment');
+    const anchorOverrideService = anchorOverrideObjects.find((obj: any) => obj.kind === 'Service');
+    
+    expect(anchorOverrideDeployment.metadata.name).toBe('anchor-override-app');
+    expect(anchorOverrideDeployment.spec.replicas).toBe(45);
+    expect(anchorOverrideDeployment.spec.template.spec.containers[0].ports[0].containerPort).toBe(8888);
+    expect(anchorOverrideService.metadata.name).toBe('anchor-override-app');
+    expect(anchorOverrideService.spec.ports[0].targetPort).toBe(8888);
+    expect(anchorOverrideService.spec.ports[0].port).toBe(8888);
+
+    // Clean up values files
+    fs.unlinkSync(valuesFilePath);
+    fs.unlinkSync(anchorOverrideValuesPath);
+  });
+
   it('should properly replace anchor values in generated k8s objects', async () => {
     const options = {
       cwd,
