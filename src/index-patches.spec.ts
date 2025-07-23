@@ -103,4 +103,43 @@ describe('wrapKustomizeIntoHelmPatches', () => {
     expect(service.spec.ports[0].name).toBe('http'); // Name added via patch
     expect(service.spec.ports[0].port).toBe(80); // Original value preserved
   });
+
+  it('should create helm chart with patch that adds item to envFrom array', async () => {
+    const options = {
+      cwd: './kustomize-tests',
+      targetFolder: '../test-results/patches-test',
+      directory: './patches-test',
+      kustomizeOptions: {},
+      chartName: 'test-chart',
+      chartVersion: '1.0.0',
+      chartAppVersion: '1.0.0',
+      chartDescription: 'Test Chart for Patches',
+      fs: fsDefault,
+      execSync: execSync,
+      tmpFolder: path.resolve(process.cwd(), 'test-results/patches-test'),
+      includeKustomizeFiles: true,
+    };
+
+    await wrapKustomizeIntoHelm(options);
+
+    // Test the chart with patches that add both configMapRef and secretRef to envFrom array
+    const result = execSync(`helm template test-chart . --set overlay="overlays/dev" --set-json globals.patches='[{"target":{"group":"apps","version":"v1","kind":"Deployment","name":"nginx-deployment"},"ops":[{"op":"add","path":"/spec/template/spec/containers/0/envFrom/-","value":{"configMapRef":{"name":"config-name"}}},{"op":"add","path":"/spec/template/spec/containers/0/envFrom/-","value":{"secretRef":{"name":"secret-name"}}}]}]'`, {
+      cwd: path.join(options.cwd, options.targetFolder),
+    });
+
+    const yamls = result.toString().split(/---\n#.+\n/g).filter((s: string) => s.trim() !== '');
+    
+    const objects = yamls.map((yaml: string) => parseYaml(yaml));
+    
+    // Find the deployment
+    const deployment = objects.find((o: any) => o.kind === 'Deployment');
+
+    // Verify deployment patches were applied - envFrom array should have both configMapRef and secretRef added
+    expect(deployment).toBeDefined();
+    expect(deployment.metadata.name).toBe('nginx-deployment');
+    expect(deployment.spec.template.spec.containers[0].envFrom).toEqual([
+      { configMapRef: { name: 'config-name' } },
+      { secretRef: { name: 'secret-name' } }
+    ]); // EnvFrom with both configMapRef and secretRef added via patches
+  });
 });
