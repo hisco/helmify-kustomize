@@ -96,7 +96,6 @@ function getPackageVersion(): string {
  * @property {string} [overlayFilter] - Optional comma-separated list of overlay names to include (e.g., "staging,prod")
  * @property {string} [tmpFolder] -  Temporary folder for the build
  * @property {boolean} [includeKustomizeFiles] - Optional flag to include kustomize files template (default: false)
- * @property {boolean} [replaceAnchorsWithHashes] - Optional flag to replace YAML anchor names with unique hashes (default: false)
  */
 
 interface WrapKustomizeOptions {
@@ -116,7 +115,6 @@ interface WrapKustomizeOptions {
   clearTargetFolder?: boolean;
   tmpFolder: string;
   includeKustomizeFiles?: boolean;
-  replaceAnchorsWithHashes?: boolean;
   enabledDynamicAnchorReplacement?: boolean;
 }
 /**
@@ -307,7 +305,7 @@ export async function wrapKustomizeIntoHelm({
   const chartPrefixPlaceHolder = 'chartPrefixPlaceholder|>unique';
 
   // Generate the content of the overlay results with the placeholder
-  const resultContent = overlaysResults(chartPrefixPlaceHolder, kustomizeManifestsResults);
+  const resultContent = overlaysResults(chartPrefixPlaceHolder, kustomizeManifestsResults, thisPackageVersion);
   // Calculate the hash of the content
   const chartPrefixHash = `${thisPackageId}-${shortHash(resultContent)}`;
   // Replace the placeholder with the actual hash
@@ -326,7 +324,7 @@ export async function wrapKustomizeIntoHelm({
     });
   }
   // Write the result.yaml file to the templates folder
-  const resultYamlContent = yamlResult(chartPrefixHash, thisPackageId, parametrizeConfigmaps, includeKustomizeFiles, hasTemplatedValuesYaml);
+  const resultYamlContent = yamlResult(chartPrefixHash, thisPackageId, parametrizeConfigmaps, includeKustomizeFiles, hasTemplatedValuesYaml, thisPackageVersion);
   // Write the result.yaml file to the templates folder
   fs.writeFileSync(path.join(targetTemplatesFolder, 'result.yaml'), resultYamlContent, 'utf8');
 
@@ -336,7 +334,7 @@ export async function wrapKustomizeIntoHelm({
   // The kustomization files are not relevant for the k8s content, we generate these and store them in case needed
   const kustomizationFiles = getKustomizationFiles(fs, kustomizeDir);
   // Generate the content of the kustomization files with the chart prefix hash
-  const kustomizeHelperContent = kustomizeFiles(chartPrefixHash, kustomizationFiles);
+  const kustomizeHelperContent = kustomizeFiles(chartPrefixHash, kustomizationFiles, thisPackageVersion);
   // Write the content of the kustomization files to the templates folder
   if (includeKustomizeFiles) {
     fs.writeFileSync(path.join(targetTemplatesFolder, '_kustomize-files.tpl'), kustomizeHelperContent, 'utf8');
@@ -468,7 +466,7 @@ export async function wrapKustomizeIntoHelm({
       if (enabledDynamicAnchorReplacement) {
 
         const yamlTemplateFile = [
-          generateValuesYamlTemplate(chartPrefixHash, thisPackageId, doc.toString()),
+          generateValuesYamlTemplate(chartPrefixHash, thisPackageId, doc.toString(), thisPackageVersion),
         ].join(`\n`)
 
         fs.writeFileSync(
@@ -506,7 +504,7 @@ export async function wrapKustomizeIntoHelm({
 
 
   // Write the chart utils file to the templates folder
-  const chartUtilsContent = chartUtils(thisPackageId);
+  const chartUtilsContent = chartUtils(thisPackageId, thisPackageVersion);
   fs.writeFileSync(path.join(targetTemplatesFolder, '_chart-utils.tpl'), chartUtilsContent, 'utf8');
 
   // copy the rest of the non functional files to the targetFolder (README.md, LICENSE, NOTES.txt , values.schema.json)

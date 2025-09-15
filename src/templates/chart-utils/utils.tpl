@@ -136,6 +136,27 @@ manifests:
 {{- end }}
 {{- end }}
 
+{{- define "chartUtils.podLabels" }}
+{{- $podLabels := dict }}
+{{- if .Values.podLabels }}
+{{- $podLabels = .Values.podLabels }}
+{{- end }}
+{{- if .globals.podLabels }}
+{{- $podLabels = .globals.podLabels }}
+{{- end }}
+{{- if $podLabels }}
+{{- if and (hasKey .manifest.spec "spec") (hasKey .manifest.spec.spec "template") }}
+{{- if not .manifest.spec.spec.template.metadata }}
+{{- $n := set .manifest.spec.spec.template "metadata" dict }}
+{{- end }}
+{{- if not .manifest.spec.spec.template.metadata.labels }}
+{{- $n := set .manifest.spec.spec.template.metadata "labels" dict }}
+{{- end }}
+{{- $n := merge .manifest.spec.spec.template.metadata.labels $podLabels }}
+{{- end }}
+{{- end }}
+{{- end }}
+
 {{- define "chartUtils.annotations" }} 
 {{- if .globals.annotations}}
 {{- if .manifest.spec.metadata.annotations }}
@@ -143,6 +164,27 @@ manifests:
 {{- $n := set .manifest.spec.metadata "annotations" dict -}}
 {{- end }}
 {{- $n := merge .manifest.spec.metadata.annotations .globals.annotations }}
+{{- end }}
+{{- end }}
+
+{{- define "chartUtils.podAnnotations" }}
+{{- $podAnnotations := dict }}
+{{- if .Values.podAnnotations }}
+{{- $podAnnotations = .Values.podAnnotations }}
+{{- end }}
+{{- if .globals.podAnnotations }}
+{{- $podAnnotations = .globals.podAnnotations }}
+{{- end }}
+{{- if $podAnnotations }}
+{{- if and (hasKey .manifest.spec "spec") (hasKey .manifest.spec.spec "template") }}
+{{- if not .manifest.spec.spec.template.metadata }}
+{{- $n := set .manifest.spec.spec.template "metadata" dict }}
+{{- end }}
+{{- if not .manifest.spec.spec.template.metadata.annotations }}
+{{- $n := set .manifest.spec.spec.template.metadata "annotations" dict }}
+{{- end }}
+{{- $n := merge .manifest.spec.spec.template.metadata.annotations $podAnnotations }}
+{{- end }}
 {{- end }}
 {{- end }}
 

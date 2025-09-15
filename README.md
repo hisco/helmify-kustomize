@@ -176,7 +176,8 @@ If you think that something is missing and should be added to the built in helm 
 - `Values.globals.nameSuffix` : Appends the value to the names of all resources and references.
 - `Values.globals.nameReleasePrefix` : Prepends the value to the name of the release.
 - `Values.globals.labels` : Specify the labels in all resources.
-- `Values.globals.annotations` : Specify the annotations in all resources.
+- `Values.globals.annotations` : Specify the annotations in all resources (metadata level only).
+- `Values.globals.podAnnotations` : Specify annotations for pod templates in Deployments, StatefulSets, DaemonSets, Jobs, and CronJobs.
 - `Values.globals.patches` : Apply targeted patches to specific resources. Allows fine-grained modification of Kubernetes resources based on flexible target selectors.
 - `Values.images` : Specify the images to be updated in the helm chart, simillar to kustomize images section, see example below.
 - `Values.manifests` : Specify the manifests to be added to your deployment, these manifests will go through the rest of the pipeline, i.e. they will be affected by the `globals` and `images` sections.
@@ -194,6 +195,10 @@ globals:
     app: dev
   annotations:
     app: dev
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    sidecar.istio.io/inject: "true"
   patches:
     - target:
         kind: Deployment
@@ -262,6 +267,46 @@ customGlobals:  # all global settings now go here instead of globals
     - image: old-image
       newName: prod-image
       newTag: v2.0.0
+```
+
+### Annotations vs PodAnnotations
+
+The tool provides two separate annotation features for different use cases:
+
+- **`globals.annotations`**: Applies annotations to the resource metadata (e.g., Deployment, Service, ConfigMap metadata)
+- **`globals.podAnnotations`**: Applies annotations specifically to pod templates within workload resources (Deployments, StatefulSets, DaemonSets, Jobs, CronJobs)
+
+This separation allows for fine-grained control. For example:
+- Use `globals.annotations` for resource-level metadata like ownership or documentation
+- Use `globals.podAnnotations` for pod-specific configurations like Prometheus scraping, Istio sidecar injection, or pod security policies
+
+Example showing the difference:
+```yaml
+globals:
+  annotations:
+    # These go on the Deployment metadata
+    deployment.kubernetes.io/revision: "1"
+    owner: platform-team
+  podAnnotations:
+    # These go on the pod template metadata
+    prometheus.io/scrape: "true"
+    sidecar.istio.io/inject: "true"
+```
+
+This results in:
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    deployment.kubernetes.io/revision: "1"
+    owner: platform-team
+spec:
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        sidecar.istio.io/inject: "true"
 ```
 
 ### Example of how to set these values with the helm set command

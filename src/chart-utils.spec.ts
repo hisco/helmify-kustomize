@@ -58,12 +58,32 @@ ${helmChartRaw}
   `;
 }
 
+function createPodLabelsTestTemplate(helmChartRaw: string): string {
+  return `
+${helmChartRaw}
+{{- $manifest := dict "spec" .Values.k8sManifest }}
+{{- include "chartUtils.ensureMetadata" (dict "manifest" $manifest) }}
+{{- include "chartUtils.podLabels" (dict "manifest" $manifest "globals" .Values.globals "Values" .Values) }}
+{{- toYaml $manifest.spec }}
+  `;
+}
+
 function createAnnotationsTestTemplate(helmChartRaw: string): string {
   return `
 ${helmChartRaw}
 {{- $manifest := dict "spec" .Values.k8sManifest }}
 {{- include "chartUtils.ensureMetadata" (dict "manifest" $manifest) }}
 {{- include "chartUtils.annotations" (dict "manifest" $manifest "globals" .Values.globals) }}
+{{- toYaml $manifest.spec }}
+  `;
+}
+
+function createPodAnnotationsTestTemplate(helmChartRaw: string): string {
+  return `
+${helmChartRaw}
+{{- $manifest := dict "spec" .Values.k8sManifest }}
+{{- include "chartUtils.ensureMetadata" (dict "manifest" $manifest) }}
+{{- include "chartUtils.podAnnotations" (dict "manifest" $manifest "globals" .Values.globals "Values" .Values) }}
 {{- toYaml $manifest.spec }}
   `;
 }
@@ -486,6 +506,168 @@ globals: {}
     });
   });
 
+  describe('chartUtils.podLabels', () => {
+    it('should add podLabels to deployment pod template', async () => {
+      const result = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: my-app
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: my-app
+    template:
+      metadata:
+        labels:
+          app: my-app
+      spec:
+        containers:
+        - name: app
+          image: nginx:latest
+
+globals:
+  podLabels:
+    version: "v1.0.0"
+    environment: "production"
+    tier: "backend"
+        `,
+        template: createPodLabelsTestTemplate(helmChartRaw),
+      });
+      
+      const lines = result.split('\n');
+      const yamlStart = lines.findIndex(line => line.includes('apiVersion: apps/v1'));
+      const yamlContent = lines.slice(yamlStart).join('\n');
+      const actualObject = parseYaml(yamlContent);
+      
+      expect(actualObject.spec.template.metadata.labels).toEqual({
+        app: 'my-app',
+        version: 'v1.0.0',
+        environment: 'production',
+        tier: 'backend'
+      });
+    });
+
+    it('should merge podLabels with existing pod labels', async () => {
+      const result = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: my-app
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: my-app
+    template:
+      metadata:
+        labels:
+          app: my-app
+          existing-label: "keep-me"
+      spec:
+        containers:
+        - name: app
+          image: nginx:latest
+
+globals:
+  podLabels:
+    version: "v2.0.0"
+    environment: "staging"
+    new-label: "added"
+        `,
+        template: createPodLabelsTestTemplate(helmChartRaw),
+      });
+      
+      const lines = result.split('\n');
+      const yamlStart = lines.findIndex(line => line.includes('apiVersion: apps/v1'));
+      const yamlContent = lines.slice(yamlStart).join('\n');
+      const actualObject = parseYaml(yamlContent);
+      
+      expect(actualObject.spec.template.metadata.labels).toEqual({
+        app: 'my-app',
+        'existing-label': 'keep-me',
+        version: 'v2.0.0',
+        environment: 'staging',
+        'new-label': 'added'
+      });
+    });
+
+    it('should not modify manifest when globals.podLabels is not provided', async () => {
+      const result = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: my-app
+  spec:
+    replicas: 2
+    selector:
+      matchLabels:
+        app: my-app
+    template:
+      metadata:
+        labels:
+          app: my-app
+          existing-pod-label: "value"
+      spec:
+        containers:
+        - name: app
+          image: nginx:latest
+
+globals: {}
+        `,
+        template: createPodLabelsTestTemplate(helmChartRaw),
+      });
+      
+      const lines = result.split('\n');
+      const yamlStart = lines.findIndex(line => line.includes('apiVersion: apps/v1'));
+      const yamlContent = lines.slice(yamlStart).join('\n');
+      const actualObject = parseYaml(yamlContent);
+      
+      expect(actualObject.spec.template.metadata.labels).toEqual({
+        app: 'my-app',
+        'existing-pod-label': 'value'
+      });
+    });
+
+    it('should not affect non-deployment resources', async () => {
+      const result = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: my-service
+  spec:
+    selector:
+      app: my-app
+    ports:
+    - port: 80
+
+globals:
+  podLabels:
+    version: "v1.0.0"
+        `,
+        template: createPodLabelsTestTemplate(helmChartRaw),
+      });
+      
+      const lines = result.split('\n');
+      const yamlStart = lines.findIndex(line => line.includes('apiVersion: v1'));
+      const yamlContent = lines.slice(yamlStart).join('\n');
+      const actualObject = parseYaml(yamlContent);
+      
+      // Service should not have spec.template, podLabels should not affect it
+      expect(actualObject.spec.template).toBeUndefined();
+      expect(actualObject.metadata.labels).toBeUndefined();
+    });
+  });
+
   describe('chartUtils.annotations', () => {
     it('should add annotations to existing annotations', async () => {
       const result = testHelm({
@@ -579,6 +761,169 @@ globals: {}
       expect(actualObject.metadata.annotations).toEqual({
         'existing.annotation': 'value'
       });
+    });
+  });
+
+  describe('chartUtils.podAnnotations', () => {
+    it('should add podAnnotations to deployment pod template', async () => {
+      const result = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: my-app
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: my-app
+    template:
+      metadata:
+        labels:
+          app: my-app
+      spec:
+        containers:
+        - name: app
+          image: nginx:latest
+
+globals:
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    sidecar.istio.io/inject: "true"
+        `,
+        template: createPodAnnotationsTestTemplate(helmChartRaw),
+      });
+      
+      const lines = result.split('\n');
+      const yamlStart = lines.findIndex(line => line.includes('apiVersion: apps/v1'));
+      const yamlContent = lines.slice(yamlStart).join('\n');
+      const actualObject = parseYaml(yamlContent);
+      
+      expect(actualObject.spec.template.metadata.annotations).toEqual({
+        'prometheus.io/scrape': 'true',
+        'prometheus.io/port': '8080',
+        'sidecar.istio.io/inject': 'true'
+      });
+    });
+
+    it('should merge podAnnotations with existing pod annotations', async () => {
+      const result = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: my-app
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: my-app
+    template:
+      metadata:
+        labels:
+          app: my-app
+        annotations:
+          existing.annotation: "keep-me"
+          prometheus.io/path: "/metrics"
+      spec:
+        containers:
+        - name: app
+          image: nginx:latest
+
+globals:
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    new.annotation: "added"
+        `,
+        template: createPodAnnotationsTestTemplate(helmChartRaw),
+      });
+      
+      const lines = result.split('\n');
+      const yamlStart = lines.findIndex(line => line.includes('apiVersion: apps/v1'));
+      const yamlContent = lines.slice(yamlStart).join('\n');
+      const actualObject = parseYaml(yamlContent);
+      
+      expect(actualObject.spec.template.metadata.annotations).toEqual({
+        'existing.annotation': 'keep-me',
+        'prometheus.io/path': '/metrics',
+        'prometheus.io/scrape': 'true',
+        'prometheus.io/port': '9090',
+        'new.annotation': 'added'
+      });
+    });
+
+    it('should not modify manifest when globals.podAnnotations is not provided', async () => {
+      const result = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: my-app
+  spec:
+    replicas: 2
+    selector:
+      matchLabels:
+        app: my-app
+    template:
+      metadata:
+        labels:
+          app: my-app
+        annotations:
+          existing.pod.annotation: "value"
+      spec:
+        containers:
+        - name: app
+          image: nginx:latest
+
+globals: {}
+        `,
+        template: createPodAnnotationsTestTemplate(helmChartRaw),
+      });
+      
+      const lines = result.split('\n');
+      const yamlStart = lines.findIndex(line => line.includes('apiVersion: apps/v1'));
+      const yamlContent = lines.slice(yamlStart).join('\n');
+      const actualObject = parseYaml(yamlContent);
+      
+      expect(actualObject.spec.template.metadata.annotations).toEqual({
+        'existing.pod.annotation': 'value'
+      });
+    });
+
+    it('should not affect non-deployment resources', async () => {
+      const result = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: my-service
+  spec:
+    selector:
+      app: my-app
+    ports:
+    - port: 80
+
+globals:
+  podAnnotations:
+    prometheus.io/scrape: "true"
+        `,
+        template: createPodAnnotationsTestTemplate(helmChartRaw),
+      });
+      
+      const lines = result.split('\n');
+      const yamlStart = lines.findIndex(line => line.includes('apiVersion: v1'));
+      const yamlContent = lines.slice(yamlStart).join('\n');
+      const actualObject = parseYaml(yamlContent);
+      
+      // Service should not have spec.template, podAnnotations should not affect it
+      expect(actualObject.spec.template).toBeUndefined();
+      expect(actualObject.metadata.annotations).toBeUndefined();
     });
   });
 
