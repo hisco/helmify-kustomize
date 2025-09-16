@@ -1,0 +1,44 @@
+# Parent chart values
+# Override child chart dynamic anchor values
+child-chart-dynamic-anchors:
+  overlay: "overlays/dev"  # Select the overlay to use
+  replicas: 5  # Override the anchor value from child (was 2)
+  resources:
+    requests:
+      memory: "1Gi"    # Override from child (was 512Mi)
+      cpu: "1000m"     # Override from child (was 500m)
+    limits:
+      memory: "2Gi"    # Override from child (was 1Gi)
+      cpu: "2000m"     # Override from child (was 1000m)
+  nodeSelector:
+    disktype: "nvme"   # Override from child (was ssd)
+    zone: "us-west-1a" # Add additional selector
+  serviceType: NodePort  # Override service type from child (was LoadBalancer)
+  containerPort: 9090  # Override port from child (was 8080)
+  terminationGracePeriod: 60  # Override from child (was 30)
+  hostNetwork: true  # Override from child (was false)
+  dnsPolicy: Default  # Override from child (was ClusterFirst)
+  restartPolicy: OnFailure  # Override from child (was Always)
+  securityContext:  # Override security context
+    runAsUser: 2000
+    runAsGroup: 4000
+    fsGroup: 3000
+    readOnlyRootFilesystem: true
+  affinity:  # Override affinity rules
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: node-type
+            operator: In
+            values:
+            - production
+  tolerations:  # Override tolerations
+    - key: "dedicated"
+      operator: "Equal"
+      value: "production"
+      effect: "NoSchedule"
+    - key: "node.kubernetes.io/unreachable"
+      operator: "Exists"
+      effect: "NoExecute"
+      tolerationSeconds: 600

@@ -1,0 +1,46 @@
+# To control the output of the manifests, you can use the following properties in the globals section:
+# FYI helm chart has the concept globals but it's with the property name "global" and not "globals"
+# helmifyPrefix: "globals"
+# globals:
+#  addStandardHeaders: false # by default it's true, `true` will add the standard helm headers to the manifests
+#  namespace: "namespace"
+#  namePrefix: "namePrefix"
+#  nameSuffix: "nameSuffix"
+#  nameReleasePrefix: "nameReleasePrefix"
+#  labels:
+#    key: "label"
+#  annotations:
+#    key: "annotation"
+#  resources:
+#    - name: "resource"
+#      version: "v1"
+#      kind: "Resource"
+#   images:
+#    - image: "old-image"
+#      newName: "new-image"
+#      newTag: "new-tag"
+#      digest: "digest"
+#      pullSecrets:
+#       - name: "pull-secret"
+#  patches:
+#    - target:
+#      group: "apps"
+#      version: "v1"
+#      kind: "Deployment"
+#      name: "nginx-deployment"
+#    ops:
+#      - op: "add"
+#        path: "/spec/template/spec/containers/0/env/-"
+#        value:
+#          name: "LOG_LEVEL"
+#          value: "debug"
+# Parent chart values
+# Override child chart dynamic anchor values
+child-chart-dynamic-anchors:
+  overlay: "overlays/dev" # Select the overlay to use
+  replicas: 5 # Override the anchor value from child (was 2)
+  resourceLimits:
+    memory: "2Gi" # Override memory from child (was 1Gi)
+    cpu: "2000m" # Override cpu from child (was 1000m)
+  serviceType: NodePort # Override service type from child (was LoadBalancer)
+overlay: ""

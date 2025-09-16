@@ -1,0 +1,5 @@
+
+{{- $runtime_replicas := include "hlmfk-1-2.getValue" (dict "Values" .Values "path" (list "replicas") "default" "2") -}}
+Debug replicas: {{ $runtime_replicas }}
+Debug .Values: {{ .Values | toYaml }}
+

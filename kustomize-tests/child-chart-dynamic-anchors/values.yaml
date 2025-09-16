@@ -1,0 +1,81 @@
+# Child chart values with dynamic anchors
+replicas: &replicas 2
+serviceType: &service_type LoadBalancer
+nodeSelector: &node_selector {"disktype":"ssd"}
+resources: &resources
+  requests:
+    memory: "512Mi"
+    cpu: "500m"
+  limits:
+    memory: "1Gi"
+    cpu: "1000m"
+containerPort: &container_port 8080
+terminationGracePeriod: &termination_grace 30
+hostNetwork: &host_network false
+dnsPolicy: &dns_policy ClusterFirst
+restartPolicy: &restart_policy Always
+securityContext: &security_context
+  runAsUser: 1000
+  runAsGroup: 3000
+  fsGroup: 2000
+affinity: &affinity_rules
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+    - labelSelector:
+        matchExpressions:
+        - key: app
+          operator: In
+          values:
+          - child-app
+      topologyKey: kubernetes.io/hostname
+tolerations: &tolerations_list
+  - key: "node.kubernetes.io/not-ready"
+    operator: "Exists"
+    effect: "NoExecute"
+    tolerationSeconds: 300
+globals:
+  patches:
+    - target:
+        kind: Deployment
+        name: child-app
+      ops:
+        - op: replace
+          path: /spec/replicas
+          value: *replicas
+        - op: replace
+          path: /spec/template/spec/containers/0/resources
+          value: *resources
+        - op: replace
+          path: /spec/template/spec/nodeSelector
+          value: *node_selector
+        - op: replace
+          path: /spec/template/spec/containers/0/ports/0/containerPort
+          value: *container_port
+        - op: replace
+          path: /spec/template/spec/terminationGracePeriodSeconds
+          value: *termination_grace
+        - op: replace
+          path: /spec/template/spec/hostNetwork
+          value: *host_network
+        - op: replace
+          path: /spec/template/spec/dnsPolicy
+          value: *dns_policy
+        - op: replace
+          path: /spec/template/spec/restartPolicy
+          value: *restart_policy
+        - op: replace
+          path: /spec/template/spec/securityContext
+          value: *security_context
+        - op: replace
+          path: /spec/template/spec/affinity
+          value: *affinity_rules
+        - op: replace
+          path: /spec/template/spec/tolerations
+          value: *tolerations_list
+    - target:
+        kind: Service
+        name: child-app-service
+      ops:
+        - op: replace
+          path: /spec/type
+          value: *service_type

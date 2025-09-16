@@ -16,7 +16,7 @@ export const yamlResult = (chartPrefix: string , packageId: string , parametrize
 
 ${hasTemplatedValuesYaml ? 
 `{{- $templateValues := fromYaml (include "${chartPrefix}.valuesYaml" (dict "Values" .Values)) }}
-{{- $values := merge $templateValues (pick .Values "overlay") }}` 
+{{- $values := merge $templateValues .Values }}` 
 : `{{- $values := .Values }}`}
 
 {{- $all := fromYaml (include "${chartPrefix}.yamls" (dict "Values" $values) ) }}

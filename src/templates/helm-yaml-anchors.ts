@@ -183,8 +183,9 @@ ${yamlValuesString}
     sortedAnchors.slice().reverse().forEach(anchor => {
       const varName = `$runtime_${anchor.name}`;
       const pathList = anchor.path.map(p => `"${p}"`).join(' ');
-      const defaultValue = anchor.value;
-      templateLines.push(`{{- ${varName} := include "${chartUtilsNamespace}.getValue" (dict "Values" .Values "path" (list ${pathList}) "default" "${defaultValue}") -}}`);
+      // Use a special marker for "not found" instead of the actual default
+      const notFoundMarker = '__HELMIFY_NOT_FOUND__';
+      templateLines.push(`{{- ${varName} := include "${chartUtilsNamespace}.getValue" (dict "Values" .Values "path" (list ${pathList}) "default" "${notFoundMarker}") -}}`);
     });
     
     // Generate default value declarations for each anchor
@@ -214,20 +215,97 @@ ${yamlValuesString}
       }
     });
     
-    // Build the result template by replacing ONLY anchor definitions (NOT references)
-    // References (*anchor_name) will be handled naturally by the YAML parser once anchors are resolved
+    // Build the result template by replacing both anchor definitions AND references
+    // Anchor definitions (&anchor_name) and references (*anchor_name) both need to be templated
     let resultTemplate = yamlValuesString;
     const replacements: Array<{anchor: string, runtime: string, default: string}> = [];
     
-    // Process ONLY anchor definitions (&anchor_name), leave references (*anchor_name) untouched
+    
+    // Process anchor definitions (&anchor_name) 
+    // For each anchor, replace the entire definition with a single placeholder
     sortedAnchors.forEach(anchor => {
-      // Match anchor definition and replace only the value part, keeping the anchor name
-      // Pattern: "key: &anchor_name value" -> "key: &anchor_name %v"
-      const anchorDefPattern = new RegExp(`(:\\s*&\\s*${anchor.name}\\b)\\s+[^\\n]*`, 'g');
-      if (resultTemplate.match(anchorDefPattern)) {
-        resultTemplate = resultTemplate.replace(anchorDefPattern, '$1 %v');
+      const escapedName = anchor.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      
+      // Use a comprehensive approach to replace entire anchor definitions
+      // This pattern matches the anchor definition line and all subsequent indented lines
+      const anchorPattern = new RegExp(
+        `^(\\s*\\S+:\\s*&\\s*${escapedName}\\b)(?:\\s+[^\\n]*)?(\\n(  .*))*`,
+        'gm'
+      );
+      
+      const matches = [...resultTemplate.matchAll(anchorPattern)];
+      
+      if (matches.length > 0) {
+        // Replace from last match to first to preserve indices
+        matches.reverse().forEach(match => {
+          const fullMatch = match[0];
+          const keyAndAnchor = match[1];
+          const replacement = keyAndAnchor + ' %s';  // Use %s for string formatting
+          
+          const startIndex = match.index!;
+          const endIndex = startIndex + fullMatch.length;
+          
+          resultTemplate = resultTemplate.substring(0, startIndex) + 
+                          replacement + 
+                          resultTemplate.substring(endIndex);
+        });
+        
         const runtimeVar = `$runtime_${anchor.name}`;
         const defaultVar = `$anchor_${anchor.name}_default`;
+        replacements.push({
+          anchor: anchor.name,
+          runtime: runtimeVar,
+          default: defaultVar
+        });
+      }
+    });
+    
+    // Now collect all positions where we'll need to place placeholders
+    // First, collect all anchor references positions before replacing
+    const allReplacements: Array<{pos: number, anchorName: string, isDefinition: boolean}> = [];
+    
+    // Collect anchor definition positions (already have %s placeholders)
+    sortedAnchors.forEach(anchor => {
+      const defPattern = new RegExp(`&${anchor.name}\\s+%s`, 'g');
+      let match;
+      while ((match = defPattern.exec(resultTemplate)) !== null) {
+        allReplacements.push({
+          pos: match.index + match[0].indexOf('%s'),
+          anchorName: anchor.name,
+          isDefinition: true
+        });
+      }
+    });
+    
+    // Collect anchor reference positions
+    sortedAnchors.forEach(anchor => {
+      const refPattern = new RegExp(`\\*${anchor.name}\\b`, 'g');
+      let match;
+      while ((match = refPattern.exec(resultTemplate)) !== null) {
+        allReplacements.push({
+          pos: match.index,
+          anchorName: anchor.name,
+          isDefinition: false
+        });
+      }
+    });
+    
+    // Sort by position to get the correct order
+    allReplacements.sort((a, b) => a.pos - b.pos);
+    
+    // Now replace anchor references with %s
+    sortedAnchors.forEach(anchor => {
+      const escapedName = anchor.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const referencePattern = new RegExp(`\\*${escapedName}\\b`, 'g');
+      resultTemplate = resultTemplate.replace(referencePattern, '%s');
+    });
+
+    // Add all anchors to replacements list for variable generation
+    sortedAnchors.forEach(anchor => {
+      const runtimeVar = `$runtime_${anchor.name}`;
+      const defaultVar = `$anchor_${anchor.name}_default`;
+      const existing = replacements.find(r => r.anchor === anchor.name);
+      if (!existing) {
         replacements.push({
           anchor: anchor.name,
           runtime: runtimeVar,
@@ -239,14 +317,105 @@ ${yamlValuesString}
     // Build final value variables for each replacement
     replacements.forEach(replacement => {
       const finalVarName = `$final_${replacement.anchor}`;
-      templateLines.push(`{{- ${finalVarName} := include "${chartUtilsNamespace}.pickFirstNonEmpty" (list ${replacement.runtime} ${replacement.default}) -}}`);
+      // Check if runtime value is the not found marker, if so use default
+      // Variables must be declared at the same scope level in Helm templates
+      templateLines.push(`{{- ${finalVarName} := "" -}}`);
+      templateLines.push(`{{- if eq ${replacement.runtime} "__HELMIFY_NOT_FOUND__" -}}`);
+      templateLines.push(`{{- ${finalVarName} = ${replacement.default} -}}`);
+      templateLines.push(`{{- else -}}`);
+      // Keep values as-is
+      templateLines.push(`{{- ${finalVarName} = ${replacement.runtime} -}}`);
+      templateLines.push(`{{- end -}}`);
     });
     
-    // Build printf parameters using the final variables
-    const printfParts = replacements.map(replacement => `$final_${replacement.anchor}`);
     
-    templateLines.push(`{{- $result := printf \`${escapeBackticks(resultTemplate)}\` ${printfParts.join(' ')} -}}`);
-    templateLines.push(`{{- $result -}}`);
+    // Instead of using printf, build the result by direct substitution
+    // Split the template by placeholders and rebuild with actual values
+    let resultParts: string[] = [];
+    let currentPos = 0;
+    
+    // Find all %s placeholders and replace them with template variables
+    const placeholderRegex = /%s/g;
+    let match;
+    
+    // Use the allReplacements array which has the correct mapping
+    let replacementIndex = 0;
+    
+    while ((match = placeholderRegex.exec(resultTemplate)) !== null) {
+      // Add the text before the placeholder
+      resultParts.push(resultTemplate.substring(currentPos, match.index));
+      
+      // Get the anchor name and type from our pre-computed mapping
+      let anchorName = '';
+      let isDefinition = false;
+      if (replacementIndex < allReplacements.length) {
+        anchorName = allReplacements[replacementIndex].anchorName;
+        isDefinition = allReplacements[replacementIndex].isDefinition;
+        replacementIndex++;
+      }
+      
+      // Add the template variable for this placeholder
+      if (anchorName) {
+        const anchor = sortedAnchors.find(a => a.name === anchorName);
+        
+        if (anchor && typeof anchor.value === 'object' && anchor.value !== null) {
+          // For complex values, we need special handling
+          // Check if this is in a patch context (not a definition)
+          if (!isDefinition) {
+            // This is a patch value - calculate indentation at build time
+            // Build the text up to this placeholder to analyze structure
+            const reconstructedText = resultParts.join('') + resultTemplate.substring(currentPos, match.index);
+            const lines = reconstructedText.split('\n');
+            
+            // Find the "value:" line we're completing
+            const lastLine = lines[lines.length - 1];
+            const valueLineIndent = lastLine.match(/^(\s*)value:/)?.[1]?.length || 0;
+            
+            // Content under "value:" should be indented by the standard YAML increment
+            // Detect the indentation increment used in this file
+            let indentIncrement = 2; // default to 2 spaces
+            
+            // Look for any list item to determine indent style
+            const listItemMatch = reconstructedText.match(/\n(\s+)- \w/);
+            if (listItemMatch) {
+              // Find the parent line's indentation
+              const beforeList = reconstructedText.substring(0, reconstructedText.indexOf(listItemMatch[0]));
+              const parentLines = beforeList.split('\n');
+              for (let i = parentLines.length - 1; i >= 0; i--) {
+                if (parentLines[i].trim() && !parentLines[i].trim().startsWith('-')) {
+                  const parentIndent = parentLines[i].match(/^(\s*)/)?.[1]?.length || 0;
+                  indentIncrement = listItemMatch[1].length - parentIndent;
+                  break;
+                }
+              }
+            }
+            
+            // Calculate the content indentation
+            const contentIndent = valueLineIndent + indentIncrement;
+            
+            // Use the calculated indent
+            resultParts.push(`{{ $final_${anchorName} | fromYaml | toYaml | nindent ${contentIndent} }}`);
+          } else {
+            // This is an anchor definition - for complex objects, format on next lines
+            // We'll add a newline and indent the complex value
+            resultParts.push(`\n{{ $final_${anchorName} | indent 2 }}`);
+          }
+        } else {
+          // Scalar value
+          resultParts.push(`{{ $final_${anchorName} }}`);
+        }
+      }
+      
+      currentPos = match.index + match[0].length;
+    }
+    
+    // Add any remaining text after the last placeholder
+    resultParts.push(resultTemplate.substring(currentPos));
+    
+    // Join all parts to create the final template
+    const finalTemplate = resultParts.join('');
+    
+    templateLines.push(finalTemplate);
     templateLines.push(`{{- end -}}`);
     
     return templateLines.join('\n');

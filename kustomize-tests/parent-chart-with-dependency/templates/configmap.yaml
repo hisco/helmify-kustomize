@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-parent-config
+data:
+  parent: "true"
+  description: "This is a parent chart that depends on a child chart with dynamic anchors"

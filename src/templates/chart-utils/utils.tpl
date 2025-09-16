@@ -22,7 +22,11 @@
   {{- end -}}
 {{- end -}}
 {{- if $found -}}
-  {{- $current -}}
+  {{- if or (kindIs "map" $current) (kindIs "slice" $current) -}}
+    {{- toYaml $current -}}
+  {{- else -}}
+    {{- $current -}}
+  {{- end -}}
 {{- else -}}
   {{- .default -}}
 {{- end -}}
