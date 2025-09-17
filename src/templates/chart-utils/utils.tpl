@@ -78,10 +78,53 @@ manifests:
 {{- end }}
 {{- end}}
 
-{{- define "chartUtils.setNamespace" }} 
-{{- if .globals.namespace}}
-{{- $n := set .manifest.spec.metadata "namespace" .globals.namespace -}}
+{{- define "chartUtils.getNamespace" }}
+{{- /*
+  Namespace resolution priority:
+  1. Use globals.namespace if valid (non-empty, trimmed length > 1)
+  2. Use .Release.Namespace if it's not empty and not "default" (user explicitly set it)
+  3. Use globals.defaultNamespace if valid (non-empty, trimmed length > 1)
+  4. Fall back to .Release.Namespace (even if empty or "default")
+*/ -}}
+{{- $namespace := "" -}}
+{{- $defaultNamespace := "" -}}
+{{- $releaseNamespace := .Release.Namespace | default "" -}}
+
+{{- /* Get namespace from globals if provided */ -}}
+{{- if and .namespace (kindIs "string" .namespace) -}}
+  {{- $namespace = .namespace | trim -}}
+{{- end -}}
+
+{{- /* Get defaultNamespace from globals if provided */ -}}
+{{- if and .defaultNamespace (kindIs "string" .defaultNamespace) -}}
+  {{- $defaultNamespace = .defaultNamespace | trim -}}
+{{- end -}}
+
+{{- /* Apply resolution logic */ -}}
+{{- if and $namespace (gt (len $namespace) 1) -}}
+  {{- /* Priority 1: Use explicit namespace if valid */ -}}
+  {{- $namespace -}}
+{{- else if and $releaseNamespace (ne $releaseNamespace "") (ne $releaseNamespace "default") -}}
+  {{- /* Priority 2: Use Release.Namespace if explicitly set (not empty and not "default") */ -}}
+  {{- $releaseNamespace -}}
+{{- else if and $defaultNamespace (gt (len $defaultNamespace) 1) -}}
+  {{- /* Priority 3: Use defaultNamespace if valid */ -}}
+  {{- $defaultNamespace -}}
+{{- else -}}
+  {{- /* Priority 4: Fall back to Release.Namespace */ -}}
+  {{- $releaseNamespace | default "default" -}}
+{{- end -}}
 {{- end }}
+
+{{- define "chartUtils.setNamespace" }}
+{{- $ns := "" -}}
+{{- $defaultNs := "" -}}
+{{- if .globals -}}
+  {{- $ns = index .globals "namespace" | default "" -}}
+  {{- $defaultNs = index .globals "defaultNamespace" | default "" -}}
+{{- end -}}
+{{- $namespace := include "chartUtils.getNamespace" (dict "namespace" $ns "defaultNamespace" $defaultNs "Release" .Release) -}}
+{{- $n := set .manifest.spec.metadata "namespace" $namespace -}}
 {{- end }}
 
 {{- define "chartUtils.setNamePrefix" }} 

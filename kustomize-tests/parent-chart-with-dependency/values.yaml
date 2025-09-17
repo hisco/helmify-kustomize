@@ -15,6 +15,18 @@ child-chart-dynamic-anchors:
     zone: "us-west-1a" # Add additional selector
   serviceType: NodePort  # Override service type from child (was LoadBalancer)
   containerPort: 9090  # Override port from child (was 8080)
+  podLabels:  # Override base pod labels
+    component: "api"
+    tier: "backend"
+    managed-by: "terraform"
+    environment: "production"
+  deploymentLabels:  # Override deployment labels (which merges podLabels)
+    component: "api"  # This overrides the merged value from podLabels
+    tier: "backend"
+    managed-by: "terraform"
+    deployment-specific: "false"  # Override
+    version: "v2.5.0"  # Override
+    replicas: "high-availability"  # New field
   terminationGracePeriod: 60  # Override from child (was 30)
   hostNetwork: true  # Override from child (was false)
   dnsPolicy: Default  # Override from child (was ClusterFirst)

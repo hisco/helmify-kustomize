@@ -73,17 +73,23 @@ patchs:
     // Parse the output
     const documents = result.split('---').filter(doc => doc.trim());
     const actualResources = documents.map(doc => {
+      let yamlContent = '';
       try {
         // Remove comment lines before parsing
         const lines = doc.split('\n');
         const yamlLines = lines.filter(line => !line.trim().startsWith('#'));
-        const yamlContent = yamlLines.join('\n').trim();
-        
+        yamlContent = yamlLines.join('\n').trim();
+
         if (!yamlContent) return null;
-        
+
         return parseYaml(yamlContent);
       } catch (e) {
-        console.error('Parse error:', e);
+        // Only return null for truly empty content
+        if (yamlContent) {
+          console.error('Failed to parse YAML content:', yamlContent.substring(0, 100));
+          console.error('Parse error:', e);
+          throw new Error(`Failed to parse YAML: ${e instanceof Error ? e.message : String(e)}`);
+        }
         return null;
       }
     }).filter(obj => obj);

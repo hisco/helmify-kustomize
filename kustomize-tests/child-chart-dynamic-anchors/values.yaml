@@ -10,6 +10,14 @@ resources: &resources
     memory: "1Gi"
     cpu: "1000m"
 containerPort: &container_port 8080
+podLabels: &podLabels
+  component: "backend"
+  tier: "application"
+  managed-by: "helm"
+deploymentLabels: &deploymentLabels
+  <<: *podLabels
+  deployment-specific: "true"
+  version: "v1.0.0"
 terminationGracePeriod: &termination_grace 30
 hostNetwork: &host_network false
 dnsPolicy: &dns_policy ClusterFirst

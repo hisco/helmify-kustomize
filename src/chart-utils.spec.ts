@@ -13,7 +13,7 @@ function createNamespaceTestTemplate(helmChartRaw: string): string {
 ${helmChartRaw}
 {{- $manifest := dict "spec" .Values.k8sManifest }}
 {{- include "chartUtils.ensureMetadata" (dict "manifest" $manifest) }}
-{{- include "chartUtils.setNamespace" (dict "manifest" $manifest "globals" .Values.globals) }}
+{{- include "chartUtils.setNamespace" (dict "manifest" $manifest "globals" .Values.globals "Release" .Release) }}
 {{- toYaml $manifest.spec }}
   `;
 }
@@ -103,6 +103,239 @@ describe('Chart Utils', () => {
   });
 
   describe('chartUtils.setNamespace', () => {
+    it('should use defaultNamespace when Release.Namespace is empty', async () => {
+      // Mock Release.Namespace as empty string
+      const result = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: test-service
+  spec:
+    ports:
+    - port: 80
+
+globals:
+  defaultNamespace: my-default-ns
+        `,
+        template: createNamespaceTestTemplate(helmChartRaw),
+        releaseNamespace: ''  // Empty Release.Namespace
+      });
+
+      const lines = result.split('\n');
+      const yamlStart = lines.findIndex(line => line.includes('apiVersion: v1'));
+      const yamlContent = lines.slice(yamlStart).join('\n');
+      const actualObject = parseYaml(yamlContent);
+
+      // Should use defaultNamespace when Release.Namespace is empty
+      expect(actualObject.metadata.namespace).toBe('my-default-ns');
+    });
+
+    it('should use defaultNamespace when Release.Namespace is "default"', async () => {
+      const result = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: test-service
+  spec:
+    ports:
+    - port: 80
+
+globals:
+  defaultNamespace: custom-default
+        `,
+        template: createNamespaceTestTemplate(helmChartRaw),
+        // Release.Namespace defaults to "default" in helm template
+      });
+
+      const lines = result.split('\n');
+      const yamlStart = lines.findIndex(line => line.includes('apiVersion: v1'));
+      const yamlContent = lines.slice(yamlStart).join('\n');
+      const actualObject = parseYaml(yamlContent);
+
+      // Should use defaultNamespace when Release.Namespace is "default"
+      expect(actualObject.metadata.namespace).toBe('custom-default');
+    });
+
+    it('should prioritize globals.namespace over defaultNamespace', async () => {
+      const result = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: test-service
+  spec:
+    ports:
+    - port: 80
+
+globals:
+  namespace: production
+  defaultNamespace: staging
+        `,
+        template: createNamespaceTestTemplate(helmChartRaw),
+      });
+
+      const lines = result.split('\n');
+      const yamlStart = lines.findIndex(line => line.includes('apiVersion: v1'));
+      const yamlContent = lines.slice(yamlStart).join('\n');
+      const actualObject = parseYaml(yamlContent);
+
+      // Should use namespace over defaultNamespace
+      expect(actualObject.metadata.namespace).toBe('production');
+    });
+
+    it('should use explicit Release.Namespace over defaultNamespace when not "default"', async () => {
+      const result = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: test-service
+  spec:
+    ports:
+    - port: 80
+
+globals:
+  defaultNamespace: my-default
+        `,
+        template: createNamespaceTestTemplate(helmChartRaw),
+        releaseNamespace: 'custom-release-ns'  // Explicitly set via --namespace
+      });
+
+      const lines = result.split('\n');
+      const yamlStart = lines.findIndex(line => line.includes('apiVersion: v1'));
+      const yamlContent = lines.slice(yamlStart).join('\n');
+      const actualObject = parseYaml(yamlContent);
+
+      // Should use explicit Release.Namespace over defaultNamespace
+      expect(actualObject.metadata.namespace).toBe('custom-release-ns');
+    });
+
+    it('should handle all namespace properties together with correct priority', async () => {
+      // Test case 1: All three defined, namespace should win
+      const result1 = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: test-service
+
+globals:
+  namespace: highest-priority
+  defaultNamespace: middle-priority
+        `,
+        template: createNamespaceTestTemplate(helmChartRaw),
+        releaseNamespace: 'lowest-priority'
+      });
+
+      const obj1 = parseYaml(result1.split('\n').slice(
+        result1.split('\n').findIndex(line => line.includes('apiVersion: v1'))
+      ).join('\n'));
+      expect(obj1.metadata.namespace).toBe('highest-priority');
+
+      // Test case 2: No namespace, explicit Release.Namespace should win over defaultNamespace
+      const result2 = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: test-service
+
+globals:
+  defaultNamespace: should-not-use
+        `,
+        template: createNamespaceTestTemplate(helmChartRaw),
+        releaseNamespace: 'explicit-ns'
+      });
+
+      const obj2 = parseYaml(result2.split('\n').slice(
+        result2.split('\n').findIndex(line => line.includes('apiVersion: v1'))
+      ).join('\n'));
+      expect(obj2.metadata.namespace).toBe('explicit-ns');
+
+      // Test case 3: Empty namespace, Release.Namespace="default", should use defaultNamespace
+      const result3 = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: test-service
+
+globals:
+  namespace: ""
+  defaultNamespace: fallback-ns
+        `,
+        template: createNamespaceTestTemplate(helmChartRaw),
+      });
+
+      const obj3 = parseYaml(result3.split('\n').slice(
+        result3.split('\n').findIndex(line => line.includes('apiVersion: v1'))
+      ).join('\n'));
+      expect(obj3.metadata.namespace).toBe('fallback-ns');
+    });
+
+    it('should use globals.namespace when it has more than one character', async () => {
+      const result = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: test-service
+  spec:
+    ports:
+    - port: 80
+
+globals:
+  namespace: production
+        `,
+        template: createNamespaceTestTemplate(helmChartRaw),
+      });
+
+      const lines = result.split('\n');
+      const yamlStart = lines.findIndex(line => line.includes('apiVersion: v1'));
+      const yamlContent = lines.slice(yamlStart).join('\n');
+      const actualObject = parseYaml(yamlContent);
+
+      // Should use globals.namespace when it's more than one character
+      expect(actualObject.metadata.namespace).toBe('production');
+    });
+
+    it('should use Release.Namespace when globals.namespace is a single character', async () => {
+      const result = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: test-service
+  spec:
+    ports:
+    - port: 80
+
+globals:
+  namespace: "a"
+        `,
+        template: createNamespaceTestTemplate(helmChartRaw),
+      });
+
+      const lines = result.split('\n');
+      const yamlStart = lines.findIndex(line => line.includes('apiVersion: v1'));
+      const yamlContent = lines.slice(yamlStart).join('\n');
+      const actualObject = parseYaml(yamlContent);
+
+      // Should use Release.Namespace when globals.namespace is single character
+      expect(actualObject.metadata.namespace).toBe('default');
+    });
+
     it('should set namespace when globals.namespace is provided', async () => {
       const result = testHelm({
         valuesYaml: `
@@ -133,7 +366,7 @@ globals:
       expect(actualObject.metadata.labels.app).toBe('my-app');
     });
 
-    it('should not modify manifest when globals.namespace is not provided', async () => {
+    it('should use Release.Namespace when globals.namespace is not provided', async () => {
       const result = testHelm({
         valuesYaml: `
 k8sManifest:
@@ -153,13 +386,14 @@ globals: {}
         `,
         template: createNamespaceTestTemplate(helmChartRaw),
       });
-      
+
       const lines = result.split('\n');
       const yamlStart = lines.findIndex(line => line.includes('apiVersion: v1'));
       const yamlContent = lines.slice(yamlStart).join('\n');
       const actualObject = parseYaml(yamlContent);
-      
-      expect(actualObject.metadata.namespace).toBeUndefined();
+
+      // When globals.namespace is not provided, should use Release.Namespace (default in helm template is "default")
+      expect(actualObject.metadata.namespace).toBe('default');
       expect(actualObject.metadata.name).toBe('my-service');
       expect(actualObject.spec.ports[0].port).toBe(80);
     });
@@ -181,19 +415,218 @@ globals:
         `,
         template: createNamespaceTestTemplate(helmChartRaw),
       });
-      
+
       const lines = result.split('\n');
       const yamlStart = lines.findIndex(line => line.includes('apiVersion: v1'));
       const yamlContent = lines.slice(yamlStart).join('\n');
       const actualObject = parseYaml(yamlContent);
-      
+
       expect(actualObject.metadata.namespace).toBe('config-namespace');
       expect(actualObject.metadata.name).toBe('my-config');
       expect(actualObject.data.key1).toBe('value1');
       expect(actualObject.data.key2).toBe('value2');
     });
 
-    it('should not modify manifest when globals has no namespace', async () => {
+    it('should use Release.Namespace for ConfigMap when globals.namespace is not provided', async () => {
+      const result = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: my-config
+  data:
+    key1: value1
+    key2: value2
+
+globals: {}
+        `,
+        template: createNamespaceTestTemplate(helmChartRaw),
+      });
+
+      const lines = result.split('\n');
+      const yamlStart = lines.findIndex(line => line.includes('apiVersion: v1'));
+      const yamlContent = lines.slice(yamlStart).join('\n');
+      const actualObject = parseYaml(yamlContent);
+
+      // ConfigMap should also use Release.Namespace (default is "default") when globals.namespace is not provided
+      expect(actualObject.metadata.namespace).toBe('default');
+      expect(actualObject.metadata.name).toBe('my-config');
+      expect(actualObject.data.key1).toBe('value1');
+      expect(actualObject.data.key2).toBe('value2');
+    });
+
+    it('should use Release.Namespace for ConfigMap when globals is undefined', async () => {
+      const result = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: my-config-no-globals
+  data:
+    config: test
+# No globals at all
+        `,
+        template: createNamespaceTestTemplate(helmChartRaw),
+      });
+
+      const lines = result.split('\n');
+      const yamlStart = lines.findIndex(line => line.includes('apiVersion: v1'));
+      const yamlContent = lines.slice(yamlStart).join('\n');
+      const actualObject = parseYaml(yamlContent);
+
+      // ConfigMap should use Release.Namespace when globals is not defined at all
+      expect(actualObject.metadata.namespace).toBe('default');
+      expect(actualObject.metadata.name).toBe('my-config-no-globals');
+      expect(actualObject.data.config).toBe('test');
+    });
+
+    it('should use Release.Namespace for various edge case namespace values', async () => {
+      // Test with just spaces - should use Release.Namespace after trimming
+      const result1 = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: space-namespace-test
+  spec:
+    ports:
+    - port: 80
+
+globals:
+  namespace: "  "  # Just spaces - should trim to empty and use Release.Namespace
+        `,
+        template: createNamespaceTestTemplate(helmChartRaw),
+      });
+
+      const lines1 = result1.split('\n');
+      const yamlStart1 = lines1.findIndex(line => line.includes('apiVersion: v1'));
+      const yamlContent1 = lines1.slice(yamlStart1).join('\n');
+      const actualObject1 = parseYaml(yamlContent1);
+
+      // Spaces should be trimmed to empty string, then use Release.Namespace
+      expect(actualObject1.metadata.namespace).toBe('default');
+
+      // Test with spaces around valid namespace - should trim and use the trimmed value
+      const result2 = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: trimmed-namespace-test
+  spec:
+    ports:
+    - port: 80
+
+globals:
+  namespace: "  production  "  # Should trim to "production"
+        `,
+        template: createNamespaceTestTemplate(helmChartRaw),
+      });
+
+      const lines2 = result2.split('\n');
+      const yamlStart2 = lines2.findIndex(line => line.includes('apiVersion: v1'));
+      const yamlContent2 = lines2.slice(yamlStart2).join('\n');
+      const actualObject2 = parseYaml(yamlContent2);
+
+      // Should use trimmed namespace value
+      expect(actualObject2.metadata.namespace).toBe('production');
+    });
+
+    it('should use Release.Namespace when globals.namespace is empty string', async () => {
+      const result = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: empty-namespace-test
+  spec:
+    selector:
+      app: test
+    ports:
+    - port: 8080
+
+globals:
+  namespace: ""  # Empty string should fallback to Release.Namespace
+        `,
+        template: createNamespaceTestTemplate(helmChartRaw),
+      });
+
+      const lines = result.split('\n');
+      const yamlStart = lines.findIndex(line => line.includes('apiVersion: v1'));
+      const yamlContent = lines.slice(yamlStart).join('\n');
+      const actualObject = parseYaml(yamlContent);
+
+      // Empty string in globals.namespace should use Release.Namespace
+      expect(actualObject.metadata.namespace).toBe('default');
+      expect(actualObject.metadata.name).toBe('empty-namespace-test');
+    });
+
+    it('should set Release.Namespace for Secret resources', async () => {
+      const result = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: v1
+  kind: Secret
+  metadata:
+    name: my-secret
+  type: Opaque
+  data:
+    username: YWRtaW4=
+    password: cGFzc3dvcmQ=
+
+globals: {}
+        `,
+        template: createNamespaceTestTemplate(helmChartRaw),
+      });
+
+      const lines = result.split('\n');
+      const yamlStart = lines.findIndex(line => line.includes('apiVersion: v1'));
+      const yamlContent = lines.slice(yamlStart).join('\n');
+      const actualObject = parseYaml(yamlContent);
+
+      // Secret should always use Release.Namespace
+      expect(actualObject.kind).toBe('Secret');
+      expect(actualObject.metadata.namespace).toBe('default');
+      expect(actualObject.metadata.name).toBe('my-secret');
+      expect(actualObject.type).toBe('Opaque');
+    });
+
+    it('should set Release.Namespace for all resource types', async () => {
+      // Test with a PersistentVolumeClaim
+      const result = testHelm({
+        valuesYaml: `
+k8sManifest:
+  apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: my-pvc
+  spec:
+    accessModes:
+    - ReadWriteOnce
+    resources:
+      requests:
+        storage: 1Gi
+        `,
+        template: createNamespaceTestTemplate(helmChartRaw),
+      });
+
+      const lines = result.split('\n');
+      const yamlStart = lines.findIndex(line => line.includes('apiVersion: v1'));
+      const yamlContent = lines.slice(yamlStart).join('\n');
+      const actualObject = parseYaml(yamlContent);
+
+      // PVC should always use Release.Namespace
+      expect(actualObject.kind).toBe('PersistentVolumeClaim');
+      expect(actualObject.metadata.namespace).toBe('default');
+      expect(actualObject.metadata.name).toBe('my-pvc');
+    });
+
+    it('should use Release.Namespace when globals has no namespace property', async () => {
       const result = testHelm({
         valuesYaml: `
 k8sManifest:
@@ -203,20 +636,21 @@ k8sManifest:
     name: my-app
   spec:
     replicas: 2
-    
+
 globals:
   # No namespace property
   someOtherProperty: value
         `,
         template: createNamespaceTestTemplate(helmChartRaw),
       });
-      
+
       const lines = result.split('\n');
       const yamlStart = lines.findIndex(line => line.includes('apiVersion: apps/v1'));
       const yamlContent = lines.slice(yamlStart).join('\n');
       const actualObject = parseYaml(yamlContent);
-      
-      expect(actualObject.metadata.namespace).toBeUndefined();
+
+      // When globals exists but has no namespace property, should use Release.Namespace
+      expect(actualObject.metadata.namespace).toBe('default');
       expect(actualObject.metadata.name).toBe('my-app');
       expect(actualObject.spec.replicas).toBe(2);
     });
@@ -1122,7 +1556,7 @@ images:
   });
 });
 
-function testHelm({valuesYaml , template }:{valuesYaml:string, template:string}):string{
+function testHelm({valuesYaml, template, releaseNamespace}:{valuesYaml:string, template:string, releaseNamespace?:string}):string{
   // create a random name folder in /tmp
   const tmpFolder = path.join(os.tmpdir(), Math.random().toString(36).substring(2, 15));
   // create folder
@@ -1139,8 +1573,12 @@ function testHelm({valuesYaml , template }:{valuesYaml:string, template:string})
     version: 1.0.0
     appVersion: 1.0.0
   `);
-  // create kustomization.yaml with content:
-  const result = execSync(`helm template test-chart . --debug` , {
+  // Build helm command with optional namespace
+  let helmCmd = `helm template test-chart . --debug`;
+  if (releaseNamespace !== undefined) {
+    helmCmd += ` --namespace "${releaseNamespace}"`;
+  }
+  const result = execSync(helmCmd, {
     cwd: tmpFolder,
   });
   return result.toString();

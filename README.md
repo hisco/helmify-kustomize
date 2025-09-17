@@ -170,8 +170,9 @@ This allows for a lot of flexibility in the helm chart, for example you can set 
 If you think that something is missing and should be added to the built in helm values, please open an issue or a pull request.
 
 - `Values.overlay` : This is the name of the overlay that is been deployed, example `overlays/dev` or `overlays/prod`.
-- `Values.helmifyPrefix` : Customize the location of global helmify configuration. By default, global settings are read from `globals`, but setting this to another value (e.g., `"customGlobals"`) will read from that location instead. 
-- `Values.globals.namespace` : Specify the namespace in all resources.
+- `Values.helmifyPrefix` : Customize the location of global helmify configuration. By default, global settings are read from `globals`, but setting this to another value (e.g., `"customGlobals"`) will read from that location instead.
+- `Values.globals.namespace` : Override the namespace for all resources (highest priority).
+- `Values.globals.defaultNamespace` : Default namespace to use when `.Release.Namespace` is not explicitly set.
 - `Values.globals.namePrefix` : Prepends the value to the names of all resources and references.
 - `Values.globals.nameSuffix` : Appends the value to the names of all resources and references.
 - `Values.globals.nameReleasePrefix` : Prepends the value to the name of the release.
@@ -182,11 +183,81 @@ If you think that something is missing and should be added to the built in helm 
 - `Values.manifests` : Specify the manifests to be added to your deployment, these manifests will go through the rest of the pipeline, i.e. they will be affected by the `globals` and `images` sections.
 - `Values.resources` : Specify the resources to be added to your deployment, these resources will be added as is to the deployment they will not go through the rest of the pipeline.
 
+## Namespace Resolution
+
+Helmify-kustomize provides a sophisticated three-tier namespace resolution system that ensures all Kubernetes resources get a namespace. The resolution follows this priority order:
+
+### Resolution Priority (Highest to Lowest)
+
+1. **`globals.namespace`** - Explicit namespace override (when valid)
+2. **`.Release.Namespace`** - User-specified namespace via `--namespace` flag (when explicitly set)
+3. **`globals.defaultNamespace`** - Chart-specific default namespace
+4. **`.Release.Namespace`** - Fallback to Helm's namespace (defaults to "default")
+
+### How It Works
+
+The namespace resolution logic:
+- First checks if `globals.namespace` is defined and valid (more than 1 character after trimming)
+- If not, checks if `.Release.Namespace` was explicitly set by the user (not empty and not "default")
+- If neither, uses `globals.defaultNamespace` if defined and valid
+- Finally falls back to `.Release.Namespace` (which defaults to "default" if not specified)
+
+### Examples
+
+#### Example 1: Using defaultNamespace
+```yaml
+# values.yaml
+globals:
+  defaultNamespace: my-app-namespace
+```
+```bash
+# Deploy without specifying namespace
+helm install myapp ./chart
+# Result: Resources deployed to "my-app-namespace"
+
+# Deploy with explicit namespace (overrides defaultNamespace)
+helm install myapp ./chart --namespace production
+# Result: Resources deployed to "production"
+```
+
+#### Example 2: Namespace override hierarchy
+```yaml
+# values.yaml
+globals:
+  namespace: override-namespace      # Highest priority
+  defaultNamespace: default-app-ns   # Used only if namespace is not set
+```
+```bash
+# Deploy with any --namespace flag
+helm install myapp ./chart --namespace user-specified
+# Result: Resources deployed to "override-namespace" (globals.namespace wins)
+```
+
+#### Example 3: Parent-child chart inheritance
+```yaml
+# Parent chart values.yaml
+globals:
+  defaultNamespace: parent-default
+
+# Child chart can inherit or override
+child-chart:
+  globals:
+    namespace: child-override  # Child overrides parent
+```
+
+### Edge Cases
+
+- **Empty strings**: Treated as invalid and fall through to next priority
+- **Single character namespaces**: Treated as invalid (must be >1 character after trimming)
+- **Whitespace**: All namespace values are trimmed before validation
+- **"default" namespace**: When `.Release.Namespace` is "default", it's treated as not explicitly set
+
 ### Example of what is possilbe to set in the `values.yaml` file
 ```yaml
 overlay: overlays/dev
 globals:
-  namespace: dev
+  namespace: dev              # Explicit override (highest priority)
+  defaultNamespace: dev-default  # Fallback when Release.Namespace not set
   namePrefix: dev-
   nameSuffix: -dev
   nameReleasePrefix: dev-
@@ -269,7 +340,15 @@ customGlobals:  # all global settings now go here instead of globals
 Here demonstrated only a few of the possible values, but you can set any of the values in the `values.yaml` file.
 
 ```sh
+# Set explicit namespace override
 helm upgrade --install example-service ./helm-chart --set globals.namespace=new-namespace --set globals.namePrefix=new-name-prefix
+
+# Set default namespace (used when --namespace is not specified)
+helm upgrade --install example-service ./helm-chart --set globals.defaultNamespace=app-default
+
+# Combine with Helm's --namespace flag
+helm upgrade --install example-service ./helm-chart --namespace production --set globals.defaultNamespace=staging
+# Result: Uses "production" (explicit --namespace takes precedence over defaultNamespace)
 ```
 
 When using custom helmifyPrefix, adjust the paths accordingly:
@@ -804,13 +883,13 @@ services:
       host: *db_host
       port: *db_port
       name: *db_name
-  
+
   order_service:
     database:
       host: *db_host
       port: *db_port
       name: *db_name
-  
+
   inventory_service:
     database:
       host: *db_host
@@ -821,6 +900,195 @@ services:
 connection_strings:
   primary: "postgresql://*db_host:*db_port/*db_name"
   readonly: "postgresql://*db_host:*db_port/*db_name?readonly=true"
+```
+
+### Advanced: Merge References with Default Values
+
+Dynamic anchor resolution also supports YAML merge references (`<<`) combined with default values, enabling powerful parent-child chart configurations where child charts can inherit and selectively override parent settings.
+
+**Example: Parent-Child Chart with Merge References**
+
+**Parent Chart `values.yaml`:**
+```yaml
+# Define base configuration as an anchor
+baseConfig: &baseConfig
+  namespace: production
+  defaultNamespace: app-default
+  labels:
+    app: myapp
+    tier: backend
+  annotations:
+    managed-by: helm
+    version: "1.0"
+
+# Parent globals use the base config
+globals:
+  <<: *baseConfig
+  namespace: parent-namespace  # Override specific value
+
+# Child chart configuration with dynamic anchors
+dynamicAnchors:
+  childChartGlobals: &childDefaults
+    defaultNamespace: child-default
+    labels:
+      environment: staging
+```
+
+**Child Chart Integration:**
+```yaml
+# The child chart receives merged configuration
+# Parent baseConfig + childChartGlobals overrides
+globals:
+  <<: [*baseConfig, *childDefaults]
+  # Results in:
+  # namespace: production (from baseConfig)
+  # defaultNamespace: child-default (from childDefaults, overrides baseConfig)
+  # labels:
+  #   app: myapp (from baseConfig)
+  #   tier: backend (from baseConfig)
+  #   environment: staging (from childDefaults)
+  # annotations: (from baseConfig, unchanged)
+```
+
+**Helm Deployment with Overrides:**
+```bash
+# Deploy with dynamic overrides
+helm install myapp ./chart \
+  --set baseConfig.namespace=custom-ns \
+  --set dynamicAnchors.childChartGlobals.labels.environment=production
+
+# All references to baseConfig and childDefaults are updated dynamically
+```
+
+### Complex Merge Example with Multiple Inheritance
+
+**Multi-tier configuration with merge references:**
+```yaml
+# Base defaults for all environments
+defaults: &defaults
+  replicas: 1
+  resources:
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+
+# Production overrides
+prodDefaults: &prodDefaults
+  <<: *defaults
+  replicas: 3
+  resources:
+    limits:
+      memory: "2Gi"
+      cpu: "2000m"
+    requests:
+      memory: "1Gi"
+      cpu: "1000m"
+
+# Staging overrides
+stagingDefaults: &stagingDefaults
+  <<: *defaults
+  replicas: 2
+  resources:
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+# Service configuration using environment-specific defaults
+services:
+  api:
+    <<: *prodDefaults  # Inherits all production settings
+    port: 8080
+
+  worker:
+    <<: *stagingDefaults  # Inherits staging settings
+    port: 8081
+
+# Dynamic anchor for child charts
+dynamicAnchors:
+  childServiceDefaults:
+    <<: *defaults  # Child charts inherit base defaults
+    namespace: child-namespace
+```
+
+**Deployment with selective overrides:**
+```bash
+# Update base defaults - affects all services inheriting from it
+helm install myapp ./chart --set defaults.replicas=5
+
+# Update production defaults - affects only services using prodDefaults
+helm install myapp ./chart --set prodDefaults.resources.limits.memory=4Gi
+
+# Combine multiple overrides
+helm install myapp ./chart \
+  --set defaults.replicas=2 \
+  --set prodDefaults.replicas=6 \
+  --set "dynamicAnchors.childServiceDefaults.namespace=custom-child-ns"
+```
+
+### Benefits of Merge References with Dynamic Anchors
+
+1. **Configuration Inheritance**: Build complex configuration hierarchies with base settings and environment-specific overrides
+2. **DRY Principle**: Define common settings once and reuse them across multiple services
+3. **Selective Overrides**: Override specific values while inheriting the rest
+4. **Runtime Flexibility**: Change any part of the inheritance chain at deployment time
+5. **Parent-Child Chart Compatibility**: Pass configuration from parent to child charts seamlessly
+
+### Integration with Namespace Resolution
+
+The dynamic anchor feature works seamlessly with the namespace resolution system. Here's an example combining both features:
+
+```yaml
+# Base configuration with namespace settings
+baseGlobals: &baseGlobals
+  defaultNamespace: app-default
+  namePrefix: app-
+  labels:
+    managed-by: helmify-kustomize
+
+# Environment-specific overrides
+prodGlobals: &prodGlobals
+  <<: *baseGlobals
+  namespace: production  # Override namespace for production
+  namePrefix: prod-
+  labels:
+    environment: production
+
+stagingGlobals: &stagingGlobals
+  <<: *baseGlobals
+  defaultNamespace: staging-default  # Different default for staging
+  namePrefix: stage-
+  labels:
+    environment: staging
+
+# Apply to globals based on overlay
+globals:
+  <<: *prodGlobals  # Use production settings by default
+
+# Dynamic anchors for child charts
+dynamicAnchors:
+  childChartGlobals:
+    <<: *stagingGlobals  # Child chart uses staging settings
+    namespace: ""  # Clear namespace to use Release.Namespace
+```
+
+**Deployment scenarios:**
+```bash
+# Scenario 1: Use production namespace from anchor
+helm install myapp ./chart
+# Result: namespace="production" (from prodGlobals anchor)
+
+# Scenario 2: Override with staging globals at runtime
+helm install myapp ./chart --set-json 'globals={"$ref":"#/stagingGlobals"}'
+# Result: namespace uses staging-default or Release.Namespace
+
+# Scenario 3: Override specific namespace while keeping other anchor values
+helm install myapp ./chart \
+  --set prodGlobals.namespace=custom-prod \
+  --set prodGlobals.labels.team=platform
+# Result: All references to prodGlobals updated with new values
 ```
 
 **Deployment with overrides:**

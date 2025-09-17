@@ -191,27 +191,62 @@ ${yamlValuesString}
     // Generate default value declarations for each anchor
     sortedAnchors.forEach(anchor => {
       const defaultVarName = `$anchor_${anchor.name}_default`;
-      const defaultValue = formatYamlValue(anchor.value);
-      
-      // Check if this anchor's value references other anchors
-      const anchorReferences = findAnchorReferences(anchor.value, sortedAnchors);
-      
-      if (anchorReferences.length > 0) {
-        // Build printf statement with placeholders for referenced anchors
-        const printfParts: string[] = [];
-        let formattedValue = defaultValue;
-        
-        anchorReferences.forEach(refAnchor => {
-          const refPattern = new RegExp(`\\*${refAnchor.name}`, 'g');
-          formattedValue = formattedValue.replace(refPattern, '%s');
-          const otherRuntimeVar = `$runtime_${refAnchor.name}`;
-          const otherDefaultVar = `$anchor_${refAnchor.name}_default`;
-          printfParts.push(`(include "${chartUtilsNamespace}.pickFirstNonEmpty" (list ${otherRuntimeVar} ${otherDefaultVar}) | indent 2)`);
-        });
-        
-        templateLines.push(`{{- ${defaultVarName} := printf \`${escapeBackticks(formattedValue)}\` ${printfParts.join(' ')} -}}`);
+
+      // Special handling for anchors with merge keys
+      if (anchor.hasMergeKey && anchor.mergedAnchors && anchor.mergedAnchors.length > 0) {
+        // Build the merged value by combining the merged anchor with additional keys
+        const mergedAnchorName = anchor.mergedAnchors[0]; // Currently handling single merge
+        const mergedRuntimeVar = `$runtime_${mergedAnchorName}`;
+        const mergedDefaultVar = `$anchor_${mergedAnchorName}_default`;
+
+        // Extract the additional keys (not the merge key)
+        const additionalKeys: {[key: string]: any} = {};
+        if (typeof anchor.value === 'object' && anchor.value !== null) {
+          for (const [key, value] of Object.entries(anchor.value)) {
+            if (key !== '<<') {
+              additionalKeys[key] = value;
+            }
+          }
+        }
+
+        // Generate the merged value template
+        if (Object.keys(additionalKeys).length > 0) {
+          const additionalYaml = formatYamlValue(additionalKeys);
+          // Use Helm's merge function to combine the anchors
+          templateLines.push(`{{- ${defaultVarName} := "" -}}`);
+          templateLines.push(`{{- if eq ${mergedRuntimeVar} "__HELMIFY_NOT_FOUND__" -}}`);
+          templateLines.push(`{{- ${defaultVarName} = merge (dict ${Object.entries(additionalKeys).map(([k, v]) => `"${k}" ${JSON.stringify(v)}`).join(' ')}) (${mergedDefaultVar} | fromYaml) | toYaml -}}`);
+          templateLines.push(`{{- else -}}`);
+          templateLines.push(`{{- ${defaultVarName} = merge (dict ${Object.entries(additionalKeys).map(([k, v]) => `"${k}" ${JSON.stringify(v)}`).join(' ')}) (${mergedRuntimeVar} | fromYaml) | toYaml -}}`);
+          templateLines.push(`{{- end -}}`);
+        } else {
+          // Just use the merged anchor value directly
+          templateLines.push(`{{- ${defaultVarName} := include "${chartUtilsNamespace}.pickFirstNonEmpty" (list ${mergedRuntimeVar} ${mergedDefaultVar}) -}}`);
+        }
       } else {
-        templateLines.push(`{{- ${defaultVarName} := printf \`${escapeBackticks(defaultValue)}\` -}}`);
+        // Regular anchor handling (no merge key)
+        const defaultValue = formatYamlValue(anchor.value);
+
+        // Check if this anchor's value references other anchors
+        const anchorReferences = findAnchorReferences(anchor.value, sortedAnchors);
+
+        if (anchorReferences.length > 0) {
+          // Build printf statement with placeholders for referenced anchors
+          const printfParts: string[] = [];
+          let formattedValue = defaultValue;
+
+          anchorReferences.forEach(refAnchor => {
+            const refPattern = new RegExp(`\\*${refAnchor.name}`, 'g');
+            formattedValue = formattedValue.replace(refPattern, '%s');
+            const otherRuntimeVar = `$runtime_${refAnchor.name}`;
+            const otherDefaultVar = `$anchor_${refAnchor.name}_default`;
+            printfParts.push(`(include "${chartUtilsNamespace}.pickFirstNonEmpty" (list ${otherRuntimeVar} ${otherDefaultVar}) | indent 2)`);
+          });
+
+          templateLines.push(`{{- ${defaultVarName} := printf \`${escapeBackticks(formattedValue)}\` ${printfParts.join(' ')} -}}`);
+        } else {
+          templateLines.push(`{{- ${defaultVarName} := printf \`${escapeBackticks(defaultValue)}\` -}}`);
+        }
       }
     });
     
@@ -452,14 +487,21 @@ function topologicalSortAnchors(anchors: AnchorInfo[]): AnchorInfo[] {
   anchors.forEach(anchor => {
     const deps = new Set<string>();
     const valueStr = JSON.stringify(anchor.value);
-    
+
     // Check if this anchor's value references other anchors
     anchors.forEach(otherAnchor => {
       if (anchor.name !== otherAnchor.name && valueStr.includes(`*${otherAnchor.name}`)) {
         deps.add(otherAnchor.name);
       }
     });
-    
+
+    // Also add dependencies for merge keys
+    if (anchor.hasMergeKey && anchor.mergedAnchors) {
+      anchor.mergedAnchors.forEach(mergedAnchor => {
+        deps.add(mergedAnchor);
+      });
+    }
+
     dependencies.set(anchor.name, deps);
   });
   

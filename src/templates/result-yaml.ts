@@ -38,8 +38,8 @@ ${includeKustomizeFiles ? `{{- $kustomizeFiles := fromYaml (include "${chartPref
 {{- end }}
 {{- include "${packageId}.ensureMetadata" (dict "manifest" $manifest)}}
 {{- include "${packageId}.updataImages" (dict "manifest" $manifest "globals" $globals)}}
+{{- include "${packageId}.setNamespace" (dict "manifest" $manifest "globals" $globals "Release" $.Release)}}
 {{- if $globals }}
-{{- include "${packageId}.setNamespace" (dict "manifest" $manifest "globals" $globals)}}
 {{- include "${packageId}.setNamePrefix" (dict "manifest" $manifest "globals" $globals)}}
 {{- include "${packageId}.setNameSuffix" (dict "manifest" $manifest "globals" $globals)}}
 {{- include "${packageId}.nameReleasePrefix" (dict "manifest" $manifest "globals" $globals "Values" $values)}}

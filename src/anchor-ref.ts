@@ -9,6 +9,8 @@ export interface AnchorInfo {
   path: (string | number)[];
   value: any;
   refs: AnchorReference[];
+  hasMergeKey?: boolean;
+  mergedAnchors?: string[];
 }
 
 export function analyzeYamlAnchors(yamlContent: string): AnchorInfo[] {
@@ -22,12 +24,27 @@ export function analyzeYamlAnchors(yamlContent: string): AnchorInfo[] {
     if (node.anchor) {
       const anchorName = node.anchor;
       const value = node.toJSON();
-      
+      const mergedAnchors: string[] = [];
+      let hasMergeKey = false;
+
+      // Check if this node contains a merge key (<<)
+      if (isMap(node) && node.items) {
+        node.items.forEach((pair: any) => {
+          const key = pair.key?.value || pair.key;
+          if (key === '<<' && isAlias(pair.value)) {
+            hasMergeKey = true;
+            mergedAnchors.push(pair.value.source);
+          }
+        });
+      }
+
       anchors.set(anchorName, {
         name: anchorName,
         path: [...path],
         value: value,
-        refs: []
+        refs: [],
+        hasMergeKey,
+        mergedAnchors
       });
     }
     
