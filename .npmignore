@@ -7,3 +7,4 @@ example
 jest.config.ts
 tsconfig.json
 .claude
+helm-output

@@ -1,0 +1,67 @@
+# Test scenario for dynamic anchors with HPA autoscaling
+# Creative generic solution: Use helmify-kustomize.io/enabled-by annotation
+# This annotation accepts a path to a value (e.g., "autoscaling.enabled")
+# and conditionally includes the manifest based on that value
+
+autoscaling:
+  enabled: true
+  minReplicas: &autoscaling_minReplicas 2
+  maxReplicas: &autoscaling_maxReplicas 10
+  targetCPUUtilizationPercentage: &autoscaling_targetCPU 70
+  targetMemoryUtilizationPercentage: &autoscaling_targetMemory 80
+
+deployment_name: &deployment_name "web-app"
+
+globals:
+  patches:
+    # Patch HPA with anchor values for deployment reference
+    - target:
+        kind: HorizontalPodAutoscaler
+        name: web-app-hpa
+      ops:
+        - op: replace
+          path: /spec/scaleTargetRef/name
+          value: *deployment_name
+        - op: replace
+          path: /spec/minReplicas
+          value: *autoscaling_minReplicas
+        - op: replace
+          path: /spec/maxReplicas
+          value: *autoscaling_maxReplicas
+        - op: replace
+          path: /spec/metrics/0/resource/target/averageUtilization
+          value: *autoscaling_targetCPU
+        - op: replace
+          path: /spec/metrics/1/resource/target/averageUtilization
+          value: *autoscaling_targetMemory
+
+manifests:
+  # HPA manifest with conditional rendering
+  # The helmify-kustomize.io/enabled-by annotation references autoscaling.enabled
+  # When autoscaling.enabled=false, this manifest will NOT be included in the chart
+  - apiVersion: autoscaling/v2
+    kind: HorizontalPodAutoscaler
+    metadata:
+      name: web-app-hpa
+      annotations:
+        helmify-kustomize.io/enabled-by: "autoscaling.enabled"
+    spec:
+      scaleTargetRef:
+        apiVersion: apps/v1
+        kind: Deployment
+        name: placeholder
+      minReplicas: 1
+      maxReplicas: 1
+      metrics:
+        - type: Resource
+          resource:
+            name: cpu
+            target:
+              type: Utilization
+              averageUtilization: 50
+        - type: Resource
+          resource:
+            name: memory
+            target:
+              type: Utilization
+              averageUtilization: 50

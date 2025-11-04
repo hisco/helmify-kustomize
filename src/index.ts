@@ -478,7 +478,17 @@ export async function wrapKustomizeIntoHelm({
         );
       }
 
-
+      // Remove manifests and globals sections from the values.yaml file when using templated values
+      // These will only be in the template (_values.yaml.tpl)
+      // This prevents static values with anchor references from overwriting templated values during mergeOverwrite
+      if (hasTemplatedValuesYaml) {
+        if (doc.has('manifests')) {
+          doc.delete('manifests');
+        }
+        if (doc.has('globals')) {
+          doc.delete('globals');
+        }
+      }
 
       // Write the modified document, preserving anchors and references
       fs.writeFileSync(

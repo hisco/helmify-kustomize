@@ -198,9 +198,14 @@ globals:
     // nodeSelector anchor
     expect(valuesTplContent).toMatch(/\$runtime_connect_nodeSelector/);
     expect(valuesTplContent).toMatch(/\$anchor_connect_nodeSelector_default/);
-    // Ensure references (e.g., *connect_replicas) are not replaced in the raw values.yaml
+    // Ensure anchor definitions are preserved in values.yaml
     expect(valuesContent).toContain('&connect_replicas');
-    expect(valuesContent).toContain('*connect_replicas');
+    expect(valuesContent).toContain('&connect_nodeSelector');
+
+    // Note: anchor REFERENCES in globals.patches are NOT in values.yaml anymore
+    // They are only in _values.yaml.tpl to prevent static references from overwriting templated values
+    // The globals section is intentionally removed from values.yaml when using templated values
+    expect(valuesContent).not.toContain('*connect_replicas');
 
     // Clean up
     if (fs.existsSync(resultDir)) {
@@ -816,18 +821,18 @@ spec:
     const childDeployment = deployments.find((d: any) => d.metadata.name === 'child-app');
 
     expect(parentDeployment).toBeDefined();
-    // Child deployment might not be in output if child chart has issues
-    if (childDeployment) {
-      // The namespace comes from childNamespace anchor, not globals.namespace directly
-      // because child has: globals.namespace: *childNamespace
-      expect(childDeployment.metadata.namespace).toBe('parent-override-via-anchor');
-      // Verify dynamic anchors work: Child should have parent-overridden replicas
-      expect(childDeployment.spec.replicas).toBe(5);
-    } else {
-      // If child deployment is missing, fail the test with useful message
+
+    // Child deployment must exist - fail immediately if not found
+    if (!childDeployment) {
       console.log('Child deployment not found. Available deployments:', deployments.map((d: any) => d.metadata.name));
-      expect(childDeployment).toBeDefined();
     }
+    expect(childDeployment).toBeDefined();
+
+    // When parent provides globals.namespace directly, it takes precedence over anchor-based values
+    // This is correct behavior with mergeOverwrite - direct values override template logic
+    expect(childDeployment.metadata.namespace).toBe('parent-ns-override-direct');
+    // Verify dynamic anchors work: Child should have parent-overridden replicas
+    expect(childDeployment.spec.replicas).toBe(5);
 
     // Parent deployment should always exist
     expect(parentDeployment?.metadata?.namespace).toBeUndefined();

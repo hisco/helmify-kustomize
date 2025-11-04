@@ -271,25 +271,17 @@ app:
     // Check that anchors are preserved
     expect(generatedValues).toContain('common: &common');
     expect(generatedValues).toContain('<<: *common');
-    
-    // Check that existing nested structure is preserved
-    expect(generatedValues).toContain('existing: value');
-    expect(generatedValues).toContain('namespace: default');
-    expect(generatedValues).toContain('existing-deep-value');
-    expect(generatedValues).toContain('existing-other');
-    
+
     // Check that overlay key was added
     expect(generatedValues).toContain('overlay:');
 
     // Verify the YAML parses correctly
     const parsedValues = parseYaml(generatedValues);
-    
-    // Verify nested structure is preserved
-    expect(parsedValues.globals.existing).toBe('value');
-    expect(parsedValues.globals.namespace).toBe('default');
-    expect(parsedValues.globals.labels.app).toBe('existing-app');
-    expect(parsedValues.globals.nested.deep.value).toBe('existing-deep-value');
-    expect(parsedValues.globals.nested.other).toBe('existing-other');
+
+    // Verify globals section was removed from values.yaml
+    // (It will only exist in _values.yaml.tpl template to prevent
+    // static anchor references from overwriting templated values during mergeOverwrite)
+    expect(parsedValues.globals).toBeUndefined();
     
     // Verify anchors work when parsed
     expect(parsedValues.app['<<'].environment).toBe('production');

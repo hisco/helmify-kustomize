@@ -16,7 +16,7 @@ export const yamlResult = (chartPrefix: string , packageId: string , parametrize
 
 ${hasTemplatedValuesYaml ? 
 `{{- $templateValues := fromYaml (include "${chartPrefix}.valuesYaml" (dict "Values" .Values)) }}
-{{- $values := merge $templateValues .Values }}` 
+{{- $values := mergeOverwrite $templateValues .Values }}` 
 : `{{- $values := .Values }}`}
 
 {{- $all := fromYaml (include "${chartPrefix}.yamls" (dict "Values" $values) ) }}
@@ -24,8 +24,26 @@ ${includeKustomizeFiles ? `{{- $kustomizeFiles := fromYaml (include "${chartPref
 
 {{- if $values.manifests }}
 {{- range $key, $manifest := $values.manifests }}
+{{- $shouldInclude := true -}}
+{{- if and $manifest.metadata $manifest.metadata.annotations }}
+{{- if hasKey $manifest.metadata.annotations "helmify-kustomize.io/enabled-by" }}
+{{- $enabledByPath := index $manifest.metadata.annotations "helmify-kustomize.io/enabled-by" }}
+{{- $enabledValue := include "${packageId}.getValue" (dict "Values" $values "path" (splitList "." $enabledByPath) "default" "true") | trim -}}
+{{- if or (eq ($enabledValue | toString) "false") (eq ($enabledValue | toString) "False") (not $enabledValue) }}
+{{- $shouldInclude = false -}}
+{{- end }}
+{{- /* Remove the control annotation from the manifest */ -}}
+{{- $_ := unset $manifest.metadata.annotations "helmify-kustomize.io/enabled-by" -}}
+{{- /* If annotations is now empty, remove it entirely */ -}}
+{{- if eq (len $manifest.metadata.annotations) 0 }}
+{{- $_ := unset $manifest.metadata "annotations" -}}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if $shouldInclude }}
 {{- $result := append $all.manifests (dict "spec" $manifest) }}
 {{- $n := set $all "manifests" $result -}}
+{{- end }}
 {{- end }}
 {{- end }}
 
