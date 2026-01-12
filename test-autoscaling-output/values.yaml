@@ -1,0 +1,50 @@
+# To control the output of the manifests, you can use the following properties in the globals section:
+# FYI helm chart has the concept globals but it's with the property name "global" and not "globals"
+# helmifyPrefix: "globals"
+# globals:
+#  addStandardHeaders: false # by default it's true, `true` will add the standard helm headers to the manifests
+#  namespace: "namespace"
+#  namePrefix: "namePrefix"
+#  nameSuffix: "nameSuffix"
+#  nameReleasePrefix: "nameReleasePrefix"
+#  labels:
+#    key: "label"
+#  annotations:
+#    key: "annotation"
+#  resources:
+#    - name: "resource"
+#      version: "v1"
+#      kind: "Resource"
+#   images:
+#    - image: "old-image"
+#      newName: "new-image"
+#      newTag: "new-tag"
+#      digest: "digest"
+#      pullSecrets:
+#       - name: "pull-secret"
+#  patches:
+#    - target:
+#      group: "apps"
+#      version: "v1"
+#      kind: "Deployment"
+#      name: "nginx-deployment"
+#    ops:
+#      - op: "add"
+#        path: "/spec/template/spec/containers/0/env/-"
+#        value:
+#          name: "LOG_LEVEL"
+#          value: "debug"
+# Test scenario for dynamic anchors with HPA autoscaling
+# Creative generic solution: Use helmify-kustomize.io/enabled-by annotation
+# This annotation accepts a path to a value (e.g., "autoscaling.enabled")
+# and conditionally includes the manifest based on that value
+
+autoscaling:
+  enabled: true
+  minReplicas: &autoscaling_minReplicas 2
+  maxReplicas: &autoscaling_maxReplicas 10
+  targetCPUUtilizationPercentage: &autoscaling_targetCPU 70
+  targetMemoryUtilizationPercentage: &autoscaling_targetMemory 80
+
+deployment_name: &deployment_name "web-app"
+overlay: ""

@@ -1553,6 +1553,285 @@ images:
       expect(actualObject.spec.ports[0].port).toBe(80);
       // Should not crash or modify anything since there are no containers
     });
+
+    describe('wildcard pattern imagePullSecrets', () => {
+      it('should apply pullSecrets to all containers when using wildcard pattern', async () => {
+        const result = testHelm({
+          valuesYaml: `
+k8sManifest:
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: multi-container-app
+  spec:
+    template:
+      spec:
+        containers:
+        - name: frontend
+          image: nginx:1.21.0
+        - name: backend
+          image: node:16-alpine
+        - name: cache
+          image: redis:7.0
+
+images:
+- image: ".*"
+  pullSecrets:
+  - name: global-registry-secret
+          `,
+          template: createImageUpdateTestTemplate(helmChartRaw),
+        });
+
+        const lines = result.split('\n');
+        const yamlStart = lines.findIndex(line => line.includes('apiVersion: apps/v1'));
+        const yamlContent = lines.slice(yamlStart).join('\n');
+        const actualObject = parseYaml(yamlContent);
+
+        // Verify all container images remain unchanged
+        expect(actualObject.spec.template.spec.containers[0].image).toBe('nginx:1.21.0');
+        expect(actualObject.spec.template.spec.containers[1].image).toBe('node:16-alpine');
+        expect(actualObject.spec.template.spec.containers[2].image).toBe('redis:7.0');
+
+        // Verify imagePullSecrets is applied at pod spec level
+        expect(actualObject.spec.template.spec.imagePullSecrets).toEqual([
+          { name: 'global-registry-secret' }
+        ]);
+      });
+
+      it('should apply multiple pullSecrets when specified in array', async () => {
+        const result = testHelm({
+          valuesYaml: `
+k8sManifest:
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: app
+  spec:
+    template:
+      spec:
+        containers:
+        - name: app
+          image: myapp:v1.0.0
+        - name: sidecar
+          image: sidecar:latest
+
+images:
+- image: ".*"
+  pullSecrets:
+  - name: docker-hub-secret
+  - name: gcr-secret
+  - name: ecr-secret
+          `,
+          template: createImageUpdateTestTemplate(helmChartRaw),
+        });
+
+        const lines = result.split('\n');
+        const yamlStart = lines.findIndex(line => line.includes('apiVersion: apps/v1'));
+        const yamlContent = lines.slice(yamlStart).join('\n');
+        const actualObject = parseYaml(yamlContent);
+
+        expect(actualObject.spec.template.spec.imagePullSecrets).toEqual([
+          { name: 'docker-hub-secret' },
+          { name: 'gcr-secret' },
+          { name: 'ecr-secret' }
+        ]);
+      });
+
+      it('should handle various image registry formats', async () => {
+        const result = testHelm({
+          valuesYaml: `
+k8sManifest:
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: registry-formats-app
+  spec:
+    template:
+      spec:
+        containers:
+        - name: docker-hub
+          image: nginx
+        - name: gcr
+          image: gcr.io/my-project/my-app:v1.2.3
+        - name: ecr
+          image: 123456789.dkr.ecr.us-east-1.amazonaws.com/app:latest
+        - name: digest
+          image: nginx@sha256:abcd1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab
+
+images:
+- image: ".*"
+  pullSecrets:
+  - name: multi-registry-secret
+          `,
+          template: createImageUpdateTestTemplate(helmChartRaw),
+        });
+
+        const lines = result.split('\n');
+        const yamlStart = lines.findIndex(line => line.includes('apiVersion: apps/v1'));
+        const yamlContent = lines.slice(yamlStart).join('\n');
+        const actualObject = parseYaml(yamlContent);
+
+        // All images should remain unchanged (nginx gets :latest tag added by default)
+        expect(actualObject.spec.template.spec.containers[0].image).toBe('nginx:latest');
+        expect(actualObject.spec.template.spec.containers[1].image).toBe('gcr.io/my-project/my-app:v1.2.3');
+        expect(actualObject.spec.template.spec.containers[2].image).toBe('123456789.dkr.ecr.us-east-1.amazonaws.com/app:latest');
+        // Images with digest get :latest added before the digest
+        expect(actualObject.spec.template.spec.containers[3].image).toBe('nginx:latest@sha256:abcd1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab');
+
+        // Verify pullSecrets applied once at pod level
+        expect(actualObject.spec.template.spec.imagePullSecrets).toEqual([
+          { name: 'multi-registry-secret' }
+        ]);
+      });
+
+      it('should work with wildcard and specific image pattern together', async () => {
+        const result = testHelm({
+          valuesYaml: `
+k8sManifest:
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: mixed-app
+  spec:
+    template:
+      spec:
+        containers:
+        - name: app
+          image: nginx:1.14.2
+        - name: db
+          image: postgres:13
+        - name: cache
+          image: redis:6
+
+images:
+- image: ".*"
+  pullSecrets:
+  - name: global-secret
+- image: nginx
+  newName: private-registry.com/nginx
+  newTag: "1.21.0"
+          `,
+          template: createImageUpdateTestTemplate(helmChartRaw),
+        });
+
+        const lines = result.split('\n');
+        const yamlStart = lines.findIndex(line => line.includes('apiVersion: apps/v1'));
+        const yamlContent = lines.slice(yamlStart).join('\n');
+        const actualObject = parseYaml(yamlContent);
+
+        // Verify nginx image was replaced
+        expect(actualObject.spec.template.spec.containers[0].image).toBe('private-registry.com/nginx:1.21.0');
+
+        // Verify other images unchanged
+        expect(actualObject.spec.template.spec.containers[1].image).toBe('postgres:13');
+        expect(actualObject.spec.template.spec.containers[2].image).toBe('redis:6');
+
+        // Verify imagePullSecrets applied to all
+        expect(actualObject.spec.template.spec.imagePullSecrets).toEqual([
+          { name: 'global-secret' }
+        ]);
+      });
+
+      it('should handle manifest without containers gracefully', async () => {
+        const result = testHelm({
+          valuesYaml: `
+k8sManifest:
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: my-service
+  spec:
+    selector:
+      app: my-app
+    ports:
+    - port: 80
+
+images:
+- image: ".*"
+  pullSecrets:
+  - name: should-not-apply
+          `,
+          template: createImageUpdateTestTemplate(helmChartRaw),
+        });
+
+        const lines = result.split('\n');
+        const yamlStart = lines.findIndex(line => line.includes('apiVersion: v1'));
+        const yamlContent = lines.slice(yamlStart).join('\n');
+        const actualObject = parseYaml(yamlContent);
+
+        expect(actualObject.kind).toBe('Service');
+        expect(actualObject.metadata.name).toBe('my-service');
+        expect(actualObject.spec.imagePullSecrets).toBeUndefined();
+      });
+
+      it('should not add imagePullSecrets when wildcard has no pullSecrets defined', async () => {
+        const result = testHelm({
+          valuesYaml: `
+k8sManifest:
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: app
+  spec:
+    template:
+      spec:
+        containers:
+        - name: app
+          image: nginx:1.21.0
+
+images:
+- image: ".*"
+  newTag: "1.22.0"
+          `,
+          template: createImageUpdateTestTemplate(helmChartRaw),
+        });
+
+        const lines = result.split('\n');
+        const yamlStart = lines.findIndex(line => line.includes('apiVersion: apps/v1'));
+        const yamlContent = lines.slice(yamlStart).join('\n');
+        const actualObject = parseYaml(yamlContent);
+
+        // Verify no imagePullSecrets added
+        expect(actualObject.spec.template.spec.imagePullSecrets).toBeUndefined();
+      });
+
+      it('should override imagePullSecrets when multiple wildcard patterns exist', async () => {
+        const result = testHelm({
+          valuesYaml: `
+k8sManifest:
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: app
+  spec:
+    template:
+      spec:
+        containers:
+        - name: app
+          image: nginx:1.21.0
+
+images:
+- image: ".*"
+  pullSecrets:
+  - name: first-secret
+- image: ".*"
+  pullSecrets:
+  - name: second-secret
+          `,
+          template: createImageUpdateTestTemplate(helmChartRaw),
+        });
+
+        const lines = result.split('\n');
+        const yamlStart = lines.findIndex(line => line.includes('apiVersion: apps/v1'));
+        const yamlContent = lines.slice(yamlStart).join('\n');
+        const actualObject = parseYaml(yamlContent);
+
+        // Last wildcard entry should override
+        expect(actualObject.spec.template.spec.imagePullSecrets).toEqual([
+          { name: 'second-secret' }
+        ]);
+      });
+    });
   });
 });
 

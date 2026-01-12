@@ -1,0 +1,17 @@
+# Test scenario for imagePullSecrets with YAML anchors
+# User-friendly interface: Define imagePullSecrets once, reference everywhere
+
+imagePullSecrets: &image_pull_secrets
+  - name: default-registry-secret
+
+# Apply imagePullSecrets using globals.patches (THE WORKING PATTERN!)
+# This is the same approach used for replicas, resources, nodeSelector in production
+globals:
+  patches:
+    - target:
+        kind: Deployment
+        name: multi-container-app
+      ops:
+        - op: add
+          path: /spec/template/spec/imagePullSecrets
+          value: *image_pull_secrets  # Anchor reference in patch value

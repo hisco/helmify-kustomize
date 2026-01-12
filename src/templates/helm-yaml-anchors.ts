@@ -225,13 +225,13 @@ ${yamlValuesString}
         }
       } else {
         // Regular anchor handling (no merge key)
-        const defaultValue = formatYamlValue(anchor.value);
 
         // Check if this anchor's value references other anchors
         const anchorReferences = findAnchorReferences(anchor.value, sortedAnchors);
 
         if (anchorReferences.length > 0) {
           // Build printf statement with placeholders for referenced anchors
+          const defaultValue = formatYamlValue(anchor.value);
           const printfParts: string[] = [];
           let formattedValue = defaultValue;
 
@@ -245,6 +245,7 @@ ${yamlValuesString}
 
           templateLines.push(`{{- ${defaultVarName} := printf \`${escapeBackticks(formattedValue)}\` ${printfParts.join(' ')} -}}`);
         } else {
+          const defaultValue = formatYamlValue(anchor.value);
           templateLines.push(`{{- ${defaultVarName} := printf \`${escapeBackticks(defaultValue)}\` -}}`);
         }
       }
@@ -427,9 +428,14 @@ ${yamlValuesString}
             
             // Calculate the content indentation
             const contentIndent = valueLineIndent + indentIncrement;
-            
+
             // Use the calculated indent
-            resultParts.push(`{{ $final_${anchorName} | fromYaml | toYaml | nindent ${contentIndent} }}`);
+            // For arrays, use nindent directly instead of fromYaml | toYaml (arrays can't be parsed reliably by fromYaml as strings)
+            if (Array.isArray(anchor.value)) {
+              resultParts.push(`{{ $final_${anchorName} | nindent ${contentIndent} }}`);
+            } else {
+              resultParts.push(`{{ $final_${anchorName} | fromYaml | toYaml | nindent ${contentIndent} }}`);
+            }
           } else {
             // This is an anchor definition - for complex objects, format on next lines
             // We'll add a newline and indent the complex value
@@ -544,12 +550,12 @@ function formatYamlValue(value: any, indent: number = 0): string {
     return value.map((item, index) => {
       const itemStr = formatYamlValue(item, indent + 1);
       const prefix = index === 0 ? '' : '\n' + indentStr;
-      
+
       if (typeof item === 'object' && item !== null) {
         const itemLines = itemStr.split('\n');
         return `${prefix}- ${itemLines[0]}${itemLines.slice(1).map(line => '\n' + indentStr + '  ' + line).join('')}`;
       }
-      
+
       return `${prefix}- ${itemStr}`;
     }).join('');
   }

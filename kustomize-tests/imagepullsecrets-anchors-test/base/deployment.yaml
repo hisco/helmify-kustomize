@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multi-container-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: multi-container-app
+  template:
+    metadata:
+      labels:
+        app: multi-container-app
+    spec:
+      containers:
+      - name: frontend
+        image: nginx:1.21
+        ports:
+        - containerPort: 80
+      - name: backend
+        image: node:16-alpine
+        ports:
+        - containerPort: 3000
+      - name: cache
+        image: redis:7.0
+        ports:
+        - containerPort: 6379
